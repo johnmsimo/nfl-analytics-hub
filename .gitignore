@@ -3,6 +3,12 @@ __pycache__/
 .env
 data/*
 !data/.gitkeep
+# Reference caches shipped for deterministic tests + prewarmed boot
+# (regenerated automatically by nfl_data.py when stale/missing):
+!data/player_week_2025.csv
+!data/schedule_2025.json
+!data/schedule_2026.json
+!data/positions.json
 
 # Deployment and local secrets
 .env

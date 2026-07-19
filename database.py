@@ -39,6 +39,10 @@ def configure_database(app: Flask) -> None:
     url = os.environ.get("DATABASE_URL", f"sqlite:///{default_path}")
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
+    # Only psycopg3 is installed; a bare postgresql:// URL (what
+    # `fly postgres attach` exports) makes SQLAlchemy try psycopg2 and crash.
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
     engine_options = {"pool_pre_ping": True, "pool_recycle": 300}
     if url.startswith("postgresql"):
         engine_options.update({

@@ -12,6 +12,10 @@ primary_region = "ewr"
   strategy = "rolling"
 
 [env]
+  # security.py keys its production behavior (required SECRET_KEY/ADMIN_PASSWORD,
+  # Secure cookies, AUTH_DISABLED ignored) off APP_ENV — without this the
+  # deployed app runs with dev fallbacks including the admin/nfl-dev login.
+  APP_ENV = "production"
   PORT = "8080"
   DATA_DIR = "/app/data"
   ENABLE_SCHEDULER = "false"
