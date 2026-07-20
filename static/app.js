@@ -164,6 +164,7 @@
     settings:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5l2-1.5-2-3-2.4.7a7 7 0 00-1.4-.8L14.5 6h-5l-.7 2.9a7 7 0 00-1.4.8L5 9l-2 3 2 1.5a7 7 0 000 1L3 16l2 3 2.4-.7a7 7 0 001.4.8l.7 2.9h5l.7-2.9a7 7 0 001.4-.8L19 19l2-3-2-1.5a7 7 0 000-1z"/></svg>',
     props:'<svg viewBox="0 0 24 24"><path d="M4 20V10m6 10V4m6 16v-7"/><path d="M2 20h20"/></svg>',
     tracker:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+    ask:'<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8.8 9a2.3 2.3 0 114 1.4c-.7.7-1.6 1-1.6 2"/><circle cx="11.2" cy="15" r=".4"/></svg>',
     live:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5a6.5 6.5 0 000 9m9-9a6.5 6.5 0 010 9M4.6 4.6a10.5 10.5 0 000 14.8m14.8-14.8a10.5 10.5 0 010 14.8"/></svg>',
     slip:'<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
     menu:'<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
@@ -171,7 +172,7 @@
   function shell(active) {
     document.body.classList.add('ai-shell');
     const nav = [
-      ['dashboard','Dashboard','/'],['games','Games','/games'],['players','Players','/players'],
+      ['dashboard','Dashboard','/'],['ask','Ask','/ask'],['games','Games','/games'],['players','Players','/players'],
       ['teams','Teams','/teams'],['projections','Projections','/projections'],
       ['live','Live Center','/live'],['analytics','Analytics','/analytics'],['rankings','Rankings','/rankings'],
       ['props','Props','/props'],['tracker','Tracker','/tracker'],['settings','Settings','/settings'],['admin','Data Ops','/admin/data']
@@ -182,7 +183,7 @@
       <div class="ai-engine"><strong><span class="pulse"></span>AI ENGINE ONLINE</strong><span id="engine-version">Intelligence v2.0</span></div>`;
     document.body.prepend(sidebar);
     const top=document.createElement('header'); top.className='ai-topbar';
-    top.innerHTML=`<input class="ai-search" id="global-search" placeholder="Search players, teams, games, stats…" aria-label="Global search">
+    top.innerHTML=`<input class="ai-search" id="global-search" placeholder="Ask anything: player, team, or stat question…" aria-label="Global search">
       <div class="ai-top-actions"><span class="weekchip" id="weekchip"></span><button class="ai-iconbtn" id="open-slip" title="Bet slip">⌁<span class="n slip-count">0</span></button><button class="ai-iconbtn">♢</button><div class="ai-profile"><span class="ai-avatar" id="profile-avatar">JS</span><span><b id="profile-name">Account</b><button class="logout-btn" id="logout-btn">Sign out</button></span></div></div>`;
     document.body.prepend(top);
     const drawer=document.createElement('div'); drawer.innerHTML=`<div class="slip-backdrop" id="slip-backdrop"></div><aside class="slip" id="slip" aria-label="Bet slip"><div class="head"><h3>Bet Slip</h3><button class="x" aria-label="close">×</button></div><div class="body" id="slip-body"></div><div class="foot"><div style="display:flex;justify-content:space-between" class="muted">Total stake <b id="slip-total" style="color:var(--t)">$0</b></div><button class="btn primary" id="slip-confirm">Confirm picks</button></div></aside>`;
@@ -210,7 +211,7 @@
     renderBadges(); renderWeekChip(getWeek());
     authSession().then(a => { const name=a.user?.name||a.user?.username||'Account'; $('#profile-name').textContent=name; $('#profile-avatar').textContent=name.split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase(); }).catch(()=>{});
     $('#logout-btn').onclick=async()=>{try{await fetchJSON('/api/auth/logout',{method:'POST'});}finally{location.href='/login';}};
-    const search=$('#global-search'); search.onkeydown=e=>{if(e.key==='Enter'&&search.value.trim()) location.href='/players?q='+encodeURIComponent(search.value.trim())};
+    const search=$('#global-search'); search.onkeydown=e=>{if(e.key==='Enter'&&search.value.trim()) location.href='/ask?q='+encodeURIComponent(search.value.trim())};
   }
 
   /* --------------------------- week controls -------------------------- */

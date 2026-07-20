@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Ask · NFL Analytics Hub</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'"><link rel="stylesheet" href="/static/theme.css"><script src="/static/app.js" defer></script>
+<style>
+.ask-hero{max-width:760px;margin:0 auto;padding-top:26px}
+.ask-box{display:flex;gap:9px}
+.ask-box input{flex:1;height:52px;font-size:16px;border-radius:14px;background:#0b0e20;border:1px solid var(--ai-line);color:#e6eefb;padding:0 18px}
+.ask-box button{border-radius:14px;padding:0 22px;font-weight:800;background:linear-gradient(135deg,var(--ai-purple),var(--ai-cyan));border:0;color:#fff;font-size:15px}
+.ask-examples{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.ask-examples button{background:#0b0e20;border:1px solid var(--ai-line);color:#9aa5c4;border-radius:99px;padding:7px 14px;font-size:12px}
+.ask-examples button:hover{color:#fff;border-color:rgba(139,92,246,.5)}
+.ask-answer{max-width:760px;margin:22px auto 0}
+.ask-headline{font-size:22px;font-weight:800;line-height:1.35}
+.ask-interp{color:#7f8bad;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-top:9px}
+.ask-summary{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.ask-summary .pill b{font-size:15px}
+.ask-table{margin-top:16px;overflow-x:auto}
+.ask-links a{color:#67e8f9;font-size:12px}
+.ask-src{color:#61708f;font-size:10px;margin-top:16px}
+.ask-err{color:#fb7185;font-weight:600}
+</style></head>
+<body><main class="wrap"><section class="ai-page">
+  <header class="ai-pagehead"><div><h1>Ask</h1><p>Ask any stat question — answered instantly from this app's own NFL data warehouse.</p></div></header>
+  <div class="ask-hero">
+    <div class="ask-box"><input id="q" placeholder='Try "Saquon Barkley rushing yards last 4 games"' autofocus><button id="go">Ask</button></div>
+    <div class="ask-examples" id="examples"></div>
+  </div>
+  <div class="ask-answer" id="answer"></div>
+</section></main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+ const {$,esc,fetchJSON,shell}=NFLHub;shell('');
+ const params=new URLSearchParams(location.search);
+ async function examples(){try{const d=await fetchJSON('/api/ask/examples');$('#examples').innerHTML=d.examples.map(e=>`<button data-q="${esc(e)}">${esc(e)}</button>`).join('');document.querySelectorAll('#examples button').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.q;go()})}catch{}}
+ function cell(c){if(c&&typeof c==='object')return `<a href="${esc(c.link)}" style="color:#67e8f9">${esc(c.text)}</a>`;return esc(c)}
+ async function go(){
+  const q=$('#q').value.trim();if(!q)return;
+  history.replaceState(null,'','/ask?q='+encodeURIComponent(q));
+  $('#answer').innerHTML='<div class="ai-card ai-cardpad ai-empty">Thinking…</div>';
+  let d;try{d=await fetchJSON('/api/ask?q='+encodeURIComponent(q))}catch(e){$('#answer').innerHTML=`<div class="ai-card ai-cardpad ask-err">${esc(e.message)}</div>`;return}
+  if(!d.ok){
+    $('#answer').innerHTML=`<div class="ai-card ai-cardpad"><div class="ask-err">${esc(d.error)}</div>${d.examples?`<div class="ask-examples">${d.examples.map(e=>`<button data-q="${esc(e)}">${esc(e)}</button>`).join('')}</div>`:''}</div>`;
+    document.querySelectorAll('#answer .ask-examples button').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.q;go()});
+    return;
+  }
+  let h=`<div class="ai-card ai-cardpad">`;
+  h+=`<div class="ask-headline">${esc(d.headline)}</div>`;
+  h+=`<div class="ask-interp">${esc(d.interpreted||'')}</div>`;
+  if(d.summary&&d.kind==='player_stat')h+=`<div class="ask-summary"><span class="pill">Total <b>${d.summary.total}</b></span><span class="pill">Per game <b>${d.summary.per_game}</b></span><span class="pill">Games <b>${d.summary.games}</b></span></div>`;
+  if(d.summary&&d.kind==='team')h+=`<div class="ask-summary"><span class="pill">Record <b>${esc(d.summary.record)}</b></span><span class="pill">PF/g <b>${d.summary.ppg}</b></span><span class="pill">PA/g <b>${d.summary.papg}</b></span></div>`;
+  if(d.table)h+=`<div class="ask-table"><table class="ai-data"><thead><tr>${d.table.columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${d.table.rows.map(r=>`<tr>${r.map(c=>`<td>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const links=[];
+  if(d.player)links.push(`<a href="/player/${esc(d.player.id)}">${esc(d.player.name)} profile →</a>`);
+  if(d.game)links.push(`<a href="${esc(d.game.link)}">Game page →</a>`);
+  if(links.length)h+=`<div class="ask-links" style="margin-top:12px">${links.join(' · ')}</div>`;
+  h+=`<div class="ask-src">Answered from this app's own data warehouse (ESPN-sourced game logs) — no external Q&A service.</div></div>`;
+  $('#answer').innerHTML=h;
+ }
+ $('#go').onclick=go;
+ $('#q').onkeydown=e=>{if(e.key==='Enter')go()};
+ examples();
+ if(params.get('q')){$('#q').value=params.get('q');go()}
+});
+</script></body></html>

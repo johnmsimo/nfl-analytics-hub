@@ -49,6 +49,7 @@ A `.env` in the repo root is auto-loaded at boot.
 | Route | Page | Purpose |
 |-------|------|---------|
 | `/` | dashboard.html | Weekly slate: scores, records, line pills; auto-refreshes while games are live |
+| `/ask` | ask.html | StatMuse-style Q&A: natural-language stat questions answered from our own warehouse |
 | `/props` | props.html | Props board: projection, P(over), best price, edge/EV/Kelly, add-to-slip |
 | `/game/<id>` | game.html | Lines board (de-vig) with slip buttons, defense-vs-position, top props |
 | `/player/<pid>` | player.html | Game-log chart vs an adjustable line, hit-rate splits, projection, matchup |

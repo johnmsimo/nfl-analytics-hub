@@ -22,6 +22,7 @@ value_engine.py         betting math (devig/EV/Kelly) — verbatim copy from the
 redis_client.py         Redis wrapper with in-memory fallback — verbatim copy from the MLB hub
 routes/games.py         /api/games/*, /api/game/<id>, /api/odds/status — lines + de-vig + best-price EV
 routes/props.py         /api/props/board, /api/props/game/<id>, /api/edges/week
+stat_query.py          StatMuse-style NL stat Q&A over the warehouse (self-tested; routes/ask.py serves /api/ask)
 routes/players.py       /api/player/<pid> — game logs + per-market projections vs next opponent + book lines
 routes/tracker_routes.py /api/tracker/* CRUD + performance + grade + closing-capture + live pace + settings
 static/theme.css        design system (volt-accent sister to the MLB hub; validated chart colors)
