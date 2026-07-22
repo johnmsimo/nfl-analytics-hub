@@ -9,7 +9,7 @@ gh auth login
 fly auth login
 ```
 
-## 2. Create the private GitHub repository
+## 2. Create or connect the GitHub repository
 
 ```bash
 gh repo create nfl-analytics-hub --private --source=. --remote=origin --push
@@ -19,10 +19,10 @@ The repository must not contain `.env`, API keys, local databases, raw provider 
 
 ## 3. Create the Fly application
 
-The default application name in `fly.toml` is `nfl-analytics-hub-johnmsimo`. Fly app names are globally unique. Change the `app` value if the name is unavailable.
+The configured Fly application name is `nfl-analytics-hub`. Fly app names are globally unique; update the `app` value in `fly.toml` if you deploy a separate instance.
 
 ```bash
-fly apps create nfl-analytics-hub-johnmsimo
+fly apps create nfl-analytics-hub
 ```
 
 ## 4. Provision PostgreSQL and Redis
@@ -64,7 +64,7 @@ fly status
 fly logs
 ```
 
-The deployment release command runs database migrations before replacing the web and worker Machines.
+The Fly release command runs `flask --app app db upgrade` before replacing the web and worker Machines. Production startup does not call `db.create_all()`; Alembic migrations are the source of truth for schema changes.
 
 ## 7. Enable GitHub Actions deployment
 
@@ -74,28 +74,33 @@ Create an app-scoped deploy token:
 fly tokens create deploy -x 720h
 ```
 
-In the GitHub repository, create an Actions secret named `FLY_API_TOKEN` containing the complete token. Pushes to `main` then run CI and deploy through `.github/workflows/fly.yml`.
+In the GitHub repository, create an Actions secret named `FLY_API_TOKEN` containing the complete token.
+
+Pushes to `main` run `.github/workflows/ci.yml`. The Fly workflow starts only after that CI workflow completes successfully on `main`. A manual `workflow_dispatch` remains available as an explicit operator-controlled deployment path.
 
 ## 8. Verify production
 
 ```bash
-curl https://nfl-analytics-hub-johnmsimo.fly.dev/health
-curl https://nfl-analytics-hub-johnmsimo.fly.dev/ready
+curl https://nfl-analytics-hub.fly.dev/health
+curl https://nfl-analytics-hub.fly.dev/ready
 ```
+
+Both probes are intentionally public for infrastructure monitoring. `/ready` checks the database but returns only a sanitized availability state; detailed failures remain in application logs.
 
 Also verify:
 
 - Web Machine is healthy.
 - Worker Machine is running.
-- Migrations completed.
+- Release-command migrations completed.
 - PostgreSQL and Redis connections succeed.
 - No optional provider secret appears in logs.
+- Disabled optional sync jobs are not registered by the scheduler.
 - `/admin/data` reports integration readiness.
 
 ## Process layout
 
 - `web`: Gunicorn application on port 8080.
 - `worker`: APScheduler ingestion and analytics service.
-- `release_command`: Alembic/Flask-Migrate database upgrade.
+- `release_command`: Flask-Migrate/Alembic database upgrade.
 
-The web process does not start the scheduler, preventing duplicate scheduled jobs.
+The web process does not start the scheduler, preventing duplicate scheduled jobs. Optional external and commercial jobs are registered only when their corresponding feature flags are enabled.
