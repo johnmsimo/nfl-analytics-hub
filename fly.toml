@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for nfl-analytics-hub on 2026-07-22T04:55:07Z
+# fly.toml app configuration file generated for nfl-analytics-hub on 2026-07-22T05:12:11Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -11,8 +11,6 @@ primary_region = 'ewr'
 
 [deploy]
   strategy = 'rolling'
-  
-  
 
 [env]
   APP_ENV = 'production'
