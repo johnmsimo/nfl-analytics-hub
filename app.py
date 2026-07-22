@@ -233,6 +233,7 @@ from routes.admin_api import admin_bp  # noqa: E402
 from routes.v2_api import v2_bp  # noqa: E402
 from routes.ask import ask_bp  # noqa: E402
 from routes.feeds import feeds_bp  # noqa: E402
+from routes.analytics_api import analytics_api_bp  # noqa: E402
 
 app.register_blueprint(games_bp)
 app.register_blueprint(props_bp)
@@ -247,6 +248,7 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(v2_bp)
 app.register_blueprint(ask_bp)
 app.register_blueprint(feeds_bp)
+app.register_blueprint(analytics_api_bp)
 
 _preload_started = False
 
