@@ -60,8 +60,19 @@ def configure_database(app: Flask) -> None:
     migrate.init_app(app, db, directory=str(root / "migrations"))
 
 
+def _should_create_schema() -> bool:
+    """Allow convenience schema creation locally, never implicitly in production."""
+    if os.environ.get("AUTO_CREATE_SCHEMA", "").lower() in {"1", "true", "yes"}:
+        return True
+    environment = os.environ.get("APP_ENV", os.environ.get("FLASK_ENV", "development")).lower()
+    return environment != "production"
+
+
 def init_database(app: Flask) -> None:
     with app.app_context():
-        # Import registers model metadata before create_all.
+        # Import model metadata for Flask-Migrate and local schema creation.
         import db_models  # noqa: F401, PLC0415
-        db.create_all()
+        if _should_create_schema():
+            db.create_all()
+        else:
+            app.logger.info("Production schema creation skipped; migrations manage the database")
