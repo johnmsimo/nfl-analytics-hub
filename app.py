@@ -48,14 +48,10 @@ init_database(app)
 _BOOT_TS = time.time()
 _HTML_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ---------------------------------------------------------------- page serving
-
-_GZ_CACHE: dict[str, tuple[str, bytes]] = {}   # path -> (etag, gzipped body)
+_GZ_CACHE: dict[str, tuple[str, bytes]] = {}
 
 
 def _page_response(filename: str) -> Response:
-    """Serve an HTML page with strong ETag + gzip. Re-read per request so
-    frontend edits show up without a restart; unchanged pages 304."""
     path = os.path.join(_HTML_DIR, filename)
     try:
         with open(path, "rb") as f:
@@ -64,8 +60,7 @@ def _page_response(filename: str) -> Response:
         return Response(f"<h1>{filename} not found</h1>", 404, mimetype="text/html")
     etag = '"' + hashlib.sha1(body).hexdigest()[:20] + '"'
     if request.headers.get("If-None-Match") == etag:
-        return Response(status=304, headers={"ETag": etag,
-                                             "Cache-Control": "no-cache"})
+        return Response(status=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
     if "gzip" in (request.headers.get("Accept-Encoding") or ""):
         hit = _GZ_CACHE.get(path)
@@ -88,8 +83,6 @@ def _gzip_json(resp: Response):
         resp.headers["Content-Length"] = str(len(resp.get_data()))
     return resp
 
-
-# --------------------------------------------------------------------- pages
 
 @app.route("/login")
 def login():
@@ -171,8 +164,6 @@ def page_player(pid):
     return _page_response("player.html")
 
 
-# ------------------------------------------------------------- health/status
-
 @app.route("/health")
 def health():
     """Liveness probe: process is running."""
@@ -187,14 +178,14 @@ def ready():
         from database import db
         db.session.execute(text("SELECT 1"))
         return jsonify({"ok": True, "database": "ready"})
-    except Exception as exc:
-        return jsonify({"ok": False, "database": "unavailable", "error": str(exc)}), 503
+    except Exception:
+        app.logger.exception("Readiness database check failed")
+        return jsonify({"ok": False, "database": "unavailable"}), 503
 
 
 @app.route("/metrics")
 def metrics():
     from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
-    # A dedicated one-shot registry prevents duplicate metric registration in tests.
     from prometheus_client import CollectorRegistry
     registry = CollectorRegistry()
     uptime = Gauge("nfl_hub_process_uptime_seconds", "Process uptime", registry=registry)
@@ -229,12 +220,10 @@ def _safe(fn, *a):
         return {"error": str(e)}
 
 
-# ---------------------------------------------------------------- blueprints
-
-from routes.games import games_bp          # noqa: E402
-from routes.props import props_bp          # noqa: E402
+from routes.games import games_bp  # noqa: E402
+from routes.props import props_bp  # noqa: E402
 from routes.tracker_routes import tracker_bp  # noqa: E402
-from routes.players import players_bp      # noqa: E402
+from routes.players import players_bp  # noqa: E402
 from routes.dashboard_api import dashboard_bp  # noqa: E402
 from routes.directories import directories_bp  # noqa: E402
 from routes.intelligence import intelligence_bp  # noqa: E402
@@ -259,15 +248,10 @@ app.register_blueprint(v2_bp)
 app.register_blueprint(ask_bp)
 app.register_blueprint(feeds_bp)
 
-
-# ------------------------------------------------------------------- preload
-
 _preload_started = False
 
 
 def _preload_caches() -> None:
-    """Kick background warms. Called from gunicorn post_fork (after the port
-    is bound) and from __main__ — never at import time."""
     global _preload_started
     if _preload_started:
         return
