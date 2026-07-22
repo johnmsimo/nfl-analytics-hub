@@ -5,6 +5,10 @@
 
 app = 'nfl-analytics-hub'
 primary_region = 'ewr'
+# Fly.io deployment configuration.
+# App names are globally unique; change this value if it is already taken.
+app = "nfl-analytics-hub"
+primary_region = "ewr"
 
 [build]
   dockerfile = 'Dockerfile'
