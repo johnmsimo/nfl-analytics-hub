@@ -1,0 +1,35 @@
+name: Quality and Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy analytics_engine routes/analytics_api.py
+      - run: bandit -q -r . -x tests,migrations,.venv
+      - run: pip-audit -r requirements.txt
+
+  analytics-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest pytest-cov
+      - run: pytest -q tests/test_analytics_engine.py --cov=analytics_engine --cov-fail-under=85
