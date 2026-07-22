@@ -15,14 +15,28 @@ from external_providers import sync_external
 from commercial_integrations import sync_commercial
 
 _scheduler = None
+_TRUE_VALUES = {"1", "true", "yes"}
 
 JOBS = {
     "cached-data-sync": {"name": "Cached data sync", "minutes": 60},
     "analytics-rebuild": {"name": "Warehouse aggregate rebuild", "minutes": 60},
     "quality-checks": {"name": "Data quality checks", "minutes": 60},
-    "external-data-sync": {"name": "External NFL data sync", "minutes": 60},
-    "commercial-data-sync": {"name": "Credentialed provider sync", "minutes": 15},
+    "external-data-sync": {
+        "name": "External NFL data sync",
+        "minutes": 60,
+        "enabled_env": "ENABLE_EXTERNAL_SYNC",
+    },
+    "commercial-data-sync": {
+        "name": "Credentialed provider sync",
+        "minutes": 15,
+        "enabled_env": "ENABLE_COMMERCIAL_SYNC",
+    },
 }
+
+
+def _job_enabled(key: str) -> bool:
+    enabled_env = JOBS[key].get("enabled_env")
+    return enabled_env is None or os.environ.get(enabled_env, "false").lower() in _TRUE_VALUES
 
 
 def _record(key, status, error=None):
@@ -39,6 +53,11 @@ def _record(key, status, error=None):
 
 def run_job(app, key):
     with app.app_context():
+        if not _job_enabled(key):
+            _record(key, "skipped", f"disabled by {JOBS[key]['enabled_env']}")
+            app.logger.info("scheduled job %s skipped because it is disabled", key)
+            return
+
         row = db.session.scalar(db.select(ScheduledJob).where(ScheduledJob.key == key))
         if row:
             row.last_started_at = datetime.now(timezone.utc)
@@ -47,20 +66,17 @@ def run_job(app, key):
             if key == "cached-data-sync":
                 sync_cached_data(os.environ.get("NFL_DATA_DIR") or os.path.join(app.root_path, "data"))
             elif key == "analytics-rebuild":
-                rebuild_analytics(None); rebuild_advanced_team_stats(None)
+                rebuild_analytics(None)
+                rebuild_advanced_team_stats(None)
             elif key == "quality-checks":
                 run_quality_checks()
             elif key == "external-data-sync":
-                if os.environ.get("ENABLE_EXTERNAL_SYNC", "false").lower() not in {"1", "true", "yes"}:
-                    raise RuntimeError("external sync is disabled; set ENABLE_EXTERNAL_SYNC=true")
                 season = int(os.environ.get("EXTERNAL_DATA_SEASON") or datetime.now(timezone.utc).year)
                 datasets = [x.strip() for x in os.environ.get("EXTERNAL_DATASETS", "pbp,rosters,injuries,depth_charts,snap_counts").split(",") if x.strip()]
                 sync_external(season, datasets)
                 if "pbp" in datasets:
                     rebuild_advanced_team_stats(season)
             elif key == "commercial-data-sync":
-                if os.environ.get("ENABLE_COMMERCIAL_SYNC", "false").lower() not in {"1", "true", "yes"}:
-                    raise RuntimeError("commercial sync is disabled; set ENABLE_COMMERCIAL_SYNC=true")
                 season = int(os.environ.get("EXTERNAL_DATA_SEASON") or datetime.now(timezone.utc).year)
                 week = int(os.environ["EXTERNAL_DATA_WEEK"]) if os.environ.get("EXTERNAL_DATA_WEEK") else None
                 datasets = [x.strip() for x in os.environ.get("COMMERCIAL_DATASETS", "weather,odds,live_games,coaches,transactions").split(",") if x.strip()]
@@ -73,10 +89,13 @@ def run_job(app, key):
 
 def start_scheduler(app):
     global _scheduler
-    if _scheduler or os.environ.get("ENABLE_SCHEDULER", "false").lower() not in {"1", "true", "yes"}:
+    if _scheduler or os.environ.get("ENABLE_SCHEDULER", "false").lower() not in _TRUE_VALUES:
         return _scheduler
     _scheduler = BackgroundScheduler(timezone="UTC", daemon=True)
     for key, cfg in JOBS.items():
+        if not _job_enabled(key):
+            app.logger.info("scheduled job %s not registered because it is disabled", key)
+            continue
         _scheduler.add_job(run_job, "interval", minutes=cfg["minutes"], args=[app, key], id=key, replace_existing=True)
     _scheduler.start()
     return _scheduler
