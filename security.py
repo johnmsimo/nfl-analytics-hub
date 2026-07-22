@@ -13,7 +13,7 @@ from typing import Any, Callable
 from flask import abort, jsonify, make_response, redirect, request, session, url_for
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
-_PUBLIC_ENDPOINTS = {"login", "api_login", "health", "static"}
+_PUBLIC_ENDPOINTS = {"login", "api_login", "health", "ready", "static"}
 
 
 def _is_production() -> bool:
@@ -62,8 +62,6 @@ def configure_security(app) -> None:
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        # style-src/font-src must include the Google Fonts hosts the pages
-        # link, or Inter/Orbitron silently never load (CSP refuses them).
         resp.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; "
