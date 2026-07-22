@@ -88,6 +88,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       <span class="pill"><b>${P.position}</b></span>
       <span class="pill">${P.games} games · ${D.stats_season}</span>
       <span class="pill">${esc(nxt)}${D.opponent ? ` <b>vs ${D.opponent}</b>` : ''}</span>
+      ${D.injury && D.injury.status && D.injury.status !== 'Active' ? `<span class="pill" style="border-color:rgba(255,82,82,.5)"><b style="color:var(--r)">${esc(D.injury.status)}</b>${D.injury.type ? ' · ' + esc(D.injury.type) : ''}</span>` : ''}
     </div>`;
 
   if (!D.markets.length) { $('#mkts').innerHTML = '<div class="empty">No projectable markets for this player.</div>'; return; }

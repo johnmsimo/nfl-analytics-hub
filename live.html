@@ -1,4 +1,57 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live Intelligence | NFL Analytics Hub</title><link rel="stylesheet" href="/static/theme.css"></head><body data-page="live"><div id="app-shell"></div><main class="ai-main"><section class="page-hero"><div><p class="eyebrow">VERSION 2.0</p><h1>Live Intelligence Center</h1><p>Warehouse-backed game state, latest play, EPA and win-probability signals.</p></div><div class="hero-actions"><input id="season" class="control" value="2025" inputmode="numeric"><input id="week" class="control" placeholder="Week"></div></section><section id="live-grid" class="card-grid"><article class="panel"><p>Loading live intelligence…</p></article></section><section class="panel"><div class="panel-head"><h2>Data freshness</h2><span id="health-summary" class="badge">Checking</span></div><div id="source-grid" class="table-wrap"></div></section></main><script src="/static/app.js"></script><script>
-async function load(){const s=document.querySelector('#season').value||2025,w=document.querySelector('#week').value;const q=`season=${encodeURIComponent(s)}${w?`&week=${encodeURIComponent(w)}`:''}`;const [live,health]=await Promise.all([App.api(`/api/v2/live?${q}`),App.api('/api/v2/platform/health')]);document.querySelector('#live-grid').innerHTML=live.games.length?live.games.map(g=>`<article class="panel"><div class="panel-head"><span class="badge">Week ${g.week}</span><span>${g.state||'scheduled'}</span></div><h2>${g.away.team} ${g.away.score??'-'} <span class="muted">at</span> ${g.home.team} ${g.home.score??'-'}</h2><p>${g.last_play?.description||'No play-by-play record yet.'}</p><div class="kpi-row"><span>Q${g.last_play?.quarter??'-'}</span><span>EPA ${g.last_play?.epa?.toFixed?.(2)??'-'}</span><span>WPA ${g.last_play?.wpa?.toFixed?.(3)??'-'}</span></div><a class="text-link" href="/game/${g.id}">Open matchup →</a></article>`).join(''):'<article class="panel"><p>No games found for this filter.</p></article>';document.querySelector('#health-summary').textContent=`${health.summary.fresh} fresh · ${health.summary.stale} stale`;document.querySelector('#source-grid').innerHTML=`<table><thead><tr><th>Source</th><th>Status</th><th>Age</th><th>Expected</th></tr></thead><tbody>${health.sources.map(x=>`<tr><td>${x.name}</td><td><span class="badge">${x.status}</span></td><td>${x.age_minutes??'Never'}${x.age_minutes!=null?' min':''}</td><td>${x.expected_minutes} min</td></tr>`).join('')}</tbody></table>`}
-document.querySelector('#season').addEventListener('change',load);document.querySelector('#week').addEventListener('change',load);App.mountShell('live');load().catch(e=>document.querySelector('#live-grid').innerHTML=`<article class="panel"><p>${e.message}</p></article>`);
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Live Center · NFL Analytics Hub</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'"><link rel="stylesheet" href="/static/theme.css"><script src="/static/app.js" defer></script>
+<style>
+.live-cols{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+@media(max-width:920px){.live-cols{grid-template-columns:1fr}}
+.news-item{display:block;padding:11px 0;border-bottom:1px solid var(--ai-line);color:inherit}
+.news-item:last-child{border-bottom:0}
+.news-item b{display:block;font-size:13px;line-height:1.4}
+.news-item small{color:#7f8bad;display:block;margin-top:4px}
+.inj-status{font-size:10px;font-weight:800;border-radius:6px;padding:2px 8px;background:#161a38;color:#bfc9e6}
+.inj-status.bad{background:rgba(255,82,82,.14);color:var(--r)}
+</style></head>
+<body><main class="wrap"><section class="ai-page">
+  <header class="ai-pagehead"><div><h1>Live Center</h1><p>Game state, ESPN injury report, and league headlines — refreshed while games are in progress.</p></div><div class="ai-controls" id="controls"></div></header>
+  <div class="live-cols">
+    <div>
+      <div class="ai-card"><div class="ai-cardpad"><h3 id="games-title">Games</h3><div id="games"><div class="ai-empty">Loading…</div></div></div></div>
+      <div class="ai-card" style="margin-top:12px"><div class="ai-cardpad"><h3>Injury report <span class="muted" id="inj-meta"></span></h3><div class="scroll" id="injuries"><div class="ai-empty">Loading…</div></div></div></div>
+    </div>
+    <div class="ai-card"><div class="ai-cardpad"><h3>Headlines</h3><div id="news"><div class="ai-empty">Loading…</div></div></div></div>
+  </div>
+</section></main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+ const {$,esc,fetchJSON,shell,weekControls,poll}=NFLHub;shell('live');
+ let stop=null;
+ await weekControls($('#controls'),loadGames);
+ loadInjuries();loadNews();
+
+ async function loadGames(w,quiet){
+  if(!quiet)$('#games').innerHTML='<div class="ai-empty">Loading…</div>';
+  let d;try{d=await fetchJSON(`/api/games/week?season=${w.season}&week=${w.week}&type=${w.type}&live=1`)}catch(e){$('#games').innerHTML=`<div class="ai-empty">${esc(e.message)}</div>`;return}
+  const live=d.games.some(g=>g.state==='in');
+  $('#games-title').innerHTML='Games'+(live?' <span class="tag live"><span class="livedot"></span> LIVE</span>':'');
+  $('#games').innerHTML=d.games.length?d.games.map(g=>{
+   const state=g.state==='in'?`<span class="tag live">${esc(g.status_detail||'LIVE')}</span>`:g.completed?'<span class="tag final">Final</span>':`<span class="tag pre">${new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'})}</span>`;
+   return `<a class="game-mini" style="display:block;color:inherit" href="/game/${g.game_id}?season=${g.season}"><div class="teams"><span>${esc(g.away_team)} ${g.away_score??''} @ ${esc(g.home_team)} ${g.home_score??''}</span>${state}</div><div class="meta"><span>${esc(g.venue||'')}</span></div></a>`;
+  }).join(''):'<div class="ai-empty">No games this week.</div>';
+  if(stop){stop();stop=null}
+  if(live)stop=poll(()=>loadGames(w,true),30000);
+ }
+
+ async function loadInjuries(){
+  let d;try{d=await fetchJSON('/api/injuries')}catch(e){$('#injuries').innerHTML=`<div class="ai-empty">${esc(e.message)}</div>`;return}
+  const rows=(d.injuries||[]).filter(i=>i.player);
+  $('#inj-meta').textContent=rows.length?`· ${rows.length} entries (ESPN)`:'';
+  if(!rows.length){$('#injuries').innerHTML='<div class="ai-empty">No injury entries right now.</div>';return}
+  $('#injuries').innerHTML=`<table class="ai-data"><thead><tr><th>Team</th><th>Player</th><th>Pos</th><th>Status</th><th>Note</th></tr></thead><tbody>${rows.slice(0,60).map(i=>`<tr><td><span class="team-pill">${esc(i.team||'')}</span></td><td><b>${esc(i.player)}</b></td><td>${esc(i.position||'')}</td><td><span class="inj-status ${['Out','Injured Reserve','Doubtful','Suspended'].includes(i.status)?'bad':''}">${esc(i.status||'—')}</span></td><td class="muted" style="white-space:normal;min-width:220px">${esc(i.comment||'')}</td></tr>`).join('')}</tbody></table>`;
+ }
+
+ async function loadNews(){
+  let d;try{d=await fetchJSON('/api/news?limit=12')}catch(e){$('#news').innerHTML=`<div class="ai-empty">${esc(e.message)}</div>`;return}
+  const arts=d.articles||[];
+  $('#news').innerHTML=arts.length?arts.map(a=>`<a class="news-item" ${a.link?`href="${esc(a.link)}" target="_blank" rel="noopener"`:''}><b>${esc(a.headline)}</b><small>${esc(a.description||'')}</small><small>${a.published?new Date(a.published).toLocaleString():''} · ESPN</small></a>`).join(''):'<div class="ai-empty">No headlines.</div>';
+ }
+});
 </script></body></html>

@@ -77,9 +77,16 @@ def api_player(pid):
         **{c: r[c] for c in nfl_data.STAT_COLS},
     } for r in rows]
 
+    import odds_api
+    nkey = odds_api.norm_player_name(meta["name"])
+    injury = next((i for i in nfl_data.get_injuries()
+                   if i["team"] == meta["team"]
+                   and odds_api.norm_player_name(i["player"]) == nkey), None)
+
     return jsonify({
         "player": {"id": pid, "name": meta["name"], "team": meta["team"],
                    "position": meta["position"], "games": meta["games"]},
+        "injury": injury,
         "stats_season": ss,
         "next_game": nxt, "opponent": opponent,
         "opponent_dvp": (dvp.get(opponent) or {}).get(

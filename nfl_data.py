@@ -235,6 +235,76 @@ def _team_ids() -> list[str]:
     return ids
 
 
+def _team_abbrev_map() -> dict[str, str]:
+    """ESPN team id -> abbreviation (cached daily)."""
+    hit = _mem_get("teamabbr")
+    if hit:
+        return hit
+    data = _get_json(f"{ESPN_BASE}/teams?limit=40")
+    out = {}
+    for lg in data.get("sports", [{}])[0].get("leagues", [{}]):
+        for t in lg.get("teams", []):
+            out[str(t["team"]["id"])] = t["team"].get("abbreviation")
+    _mem_set("teamabbr", out, 86400)
+    return out
+
+
+def get_injuries(refresh: bool = False) -> list[dict]:
+    """League-wide injury/status report from ESPN's feed, parsed lean and
+    cached 1h (the raw payload is ~9MB; we keep ~40KB). Empty list on failure
+    — callers must degrade gracefully."""
+    key = "injuries"
+    hit = _mem_get(key)
+    if hit is not None and not refresh:
+        return hit
+    out: list[dict] = []
+    try:
+        data = _get_json(f"{ESPN_BASE}/injuries")
+        abbrs = _team_abbrev_map()
+        for team_blk in data.get("injuries", []):
+            team = abbrs.get(str(team_blk.get("id"))) or team_blk.get("displayName")
+            for i in team_blk.get("injuries", []):
+                ath = i.get("athlete") or {}
+                det = i.get("details") or {}
+                out.append({
+                    "team": team,
+                    "player": ath.get("displayName"),
+                    "position": (ath.get("position") or {}).get("abbreviation"),
+                    "status": i.get("status"),
+                    "date": i.get("date"),
+                    "type": det.get("type"),
+                    "return_date": det.get("returnDate"),
+                    "comment": (i.get("shortComment") or "")[:280],
+                })
+    except Exception as e:  # noqa: BLE001
+        print(f"[nfl_data] injuries fetch failed: {e}")
+    _mem_set(key, out, 3600)
+    return out
+
+
+def get_news(limit: int = 12) -> list[dict]:
+    """League headlines from ESPN's news feed, cached 15 min. Empty on failure."""
+    key = f"news:{limit}"
+    hit = _mem_get(key)
+    if hit is not None:
+        return hit
+    out: list[dict] = []
+    try:
+        data = _get_json(f"{ESPN_BASE}/news?limit={limit}")
+        for a in data.get("articles", [])[:limit]:
+            link = (a.get("links") or {}).get("web", {}).get("href")
+            out.append({
+                "headline": a.get("headline"),
+                "description": (a.get("description") or "")[:300],
+                "published": a.get("published"),
+                "link": link,
+            })
+    except Exception as e:  # noqa: BLE001
+        print(f"[nfl_data] news fetch failed: {e}")
+    _mem_set(key, out, 900)
+    return out
+
+
 def get_positions(refresh: bool = False) -> dict[str, str]:
     """athlete id -> position abbreviation, from a 32-team roster sweep."""
     key = "positions"

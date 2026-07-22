@@ -20,6 +20,7 @@ projections.py          analytic prop model: per-market distributions + leave-fo
 tracker.py              picks store (data/daily_tracker.json), grading, CLV closing capture, workers
 value_engine.py         betting math (devig/EV/Kelly) — verbatim copy from the MLB hub, self-tested
 redis_client.py         Redis wrapper with in-memory fallback — verbatim copy from the MLB hub
+routes/feeds.py         /api/injuries + /api/news — ESPN league feeds (1h/15m cached, degrade to empty)
 routes/games.py         /api/games/*, /api/game/<id>, /api/odds/status — lines + de-vig + best-price EV
 routes/props.py         /api/props/board, /api/props/game/<id>, /api/edges/week
 stat_query.py          StatMuse-style NL stat Q&A over the warehouse (self-tested; routes/ask.py serves /api/ask)
