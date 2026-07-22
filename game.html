@@ -42,7 +42,7 @@
 </main>
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-  const { $, esc, am, fetchJSON, shell, addToSlip } = NFLHub;
+  const { $, esc, am, fetchJSON, shell, addToSlip, headshot, teamLogo } = NFLHub;
   shell('');
   const gid = location.pathname.split('/').pop();
   const season = new URLSearchParams(location.search).get('season') || '';
@@ -64,9 +64,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '<div class="mscore"><span class="at">@</span></div>';
     $('#head').innerHTML = `
       <div class="matchup">
-        <div class="mteam"><div class="nm">${esc(g.away_name)}</div><div class="rec">${esc(d.away_summary?.record||g.away_record||'')} · ${d.away_summary?`${d.away_summary.ppg} PF/g`:''}</div></div>
+        <div class="mteam"><div class="nm">${teamLogo(g.away_team,'tlogo-md')} ${esc(g.away_name)}</div><div class="rec">${esc(d.away_summary?.record||g.away_record||'')} · ${d.away_summary?`${d.away_summary.ppg} PF/g`:''}</div></div>
         ${score}
-        <div class="mteam home"><div class="nm">${esc(g.home_name)}</div><div class="rec">${esc(d.home_summary?.record||g.home_record||'')} · ${d.home_summary?`${d.home_summary.ppg} PF/g`:''}</div></div>
+        <div class="mteam home"><div class="nm">${esc(g.home_name)} ${teamLogo(g.home_team,'tlogo-md')}</div><div class="rec">${esc(d.home_summary?.record||g.home_record||'')} · ${d.home_summary?`${d.home_summary.ppg} PF/g`:''}</div></div>
       </div>
       <div class="gmeta">${state}<span>${esc(g.venue||'')}</span><span>Week ${g.week}</span><span>stats ${d.stats_season}</span></div>`;
   }
@@ -135,7 +135,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let h = '<table><thead><tr><th>Player</th><th>Market</th><th class="num">Line</th><th class="num">Proj</th><th class="num">P(O)</th><th class="num">Edge</th><th></th></tr></thead><tbody>';
     propRows.slice(0, 40).forEach((r, i) => {
       h += `<tr>
-        <td><a class="pname" href="/player/${esc(r.playerId)}?season=${r.season}">${esc(r.player)}</a> <span class="muted">${r.team} ${r.position}</span></td>
+        <td><div class="pcell">${headshot(r.playerId)}<div><a class="pname" href="/player/${esc(r.playerId)}?season=${r.season}">${esc(r.player)}</a> <span class="muted">${r.team} ${r.position}</span></div></div></td>
         <td>${esc(r.marketLabel)}</td>
         <td class="num">${r.line}${r.noOdds?'<span class="muted">*</span>':''}</td>
         <td class="num">${r.modelMean}</td>

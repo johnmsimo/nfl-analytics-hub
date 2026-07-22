@@ -22,6 +22,18 @@
     return r.json();
   }
 
+
+  /* ---------------------- ESPN imagery helpers ---------------------- */
+  const CDN = 'https://a.espncdn.com';
+  function headshot(pid, cls = 'hs') {
+    if (!pid) return '';
+    return `<img class="${cls}" loading="lazy" alt="" src="${CDN}/combiner/i?img=/i/headshots/nfl/players/full/${pid}.png&w=140&h=102" onerror="this.style.display='none'">`;
+  }
+  function teamLogo(abbr, cls = 'tlogo') {
+    if (!abbr) return '';
+    return `<img class="${cls}" loading="lazy" alt="${abbr}" src="${CDN}/combiner/i?img=/i/teamlogos/nfl/500/${String(abbr).toLowerCase()}.png&w=96&h=96" onerror="this.style.display='none'">`;
+  }
+
   /* ---------------- week state (persists across pages) ---------------- */
   const WK = 'nfl.week';
   function getWeek() { try { return JSON.parse(localStorage.getItem(WK)) || null; } catch { return null; } }
@@ -261,5 +273,6 @@
     $, esc, am, pc, fetchJSON, toast,
     shell, weekControls, resolveWeek, getWeek,
     addToSlip, openSlip, slip, poll, settings, authSession,
+    headshot, teamLogo,
   };
 })();

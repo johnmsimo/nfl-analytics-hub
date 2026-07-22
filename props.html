@@ -31,7 +31,7 @@
 </main>
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-  const { $, esc, am, fetchJSON, shell, weekControls, addToSlip } = NFLHub;
+  const { $, esc, am, fetchJSON, shell, weekControls, addToSlip, headshot, teamLogo } = NFLHub;
   shell('props');
 
   const LABELS = { pass_yds:'Pass Yards', pass_tds:'Pass TDs', rush_yds:'Rush Yards', receptions:'Receptions', rec_yds:'Rec Yards', anytime_td:'Anytime TD' };
@@ -77,8 +77,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const best = r.side === 'over' ? r.bestOver : r.bestUnder;
       const gcls = (r.grade || '').replace('+','p');
       h += `<tr>
-        <td><a class="pname" href="/player/${esc(r.playerId)}?season=${r.season}">${esc(r.player)}</a>
-            <div class="psub">${r.team} ${r.position} vs ${r.opponent}</div></td>
+        <td><div class="pcell">${headshot(r.playerId)}<div><a class="pname" href="/player/${esc(r.playerId)}?season=${r.season}">${esc(r.player)}</a>
+            <div class="psub">${teamLogo(r.team)} ${r.team} ${r.position} vs ${r.opponent}</div></div></div></td>
         <td>${esc(r.marketLabel)}</td>
         <td class="num">${r.line}${r.noOdds ? '<span class="muted">*</span>' : ''}</td>
         <td class="num">${r.modelMean}</td>

@@ -66,7 +66,7 @@
 <div class="chart-tip" id="tip"></div>
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-  const { $, esc, am, fetchJSON, shell, addToSlip } = NFLHub;
+  const { $, esc, am, fetchJSON, shell, addToSlip, headshot, teamLogo } = NFLHub;
   shell('');
   const pid = location.pathname.split('/').pop();
   const season = new URLSearchParams(location.search).get('season') || '';
@@ -82,9 +82,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     ? `Next: ${D.next_game.short_name} · Wk ${D.next_game.week}`
     : 'No upcoming game scheduled';
   $('#phead').innerHTML = `
+    ${headshot(P.id, 'hs-hero')}
     <div class="nm">${esc(P.name)}</div>
     <div class="chips">
-      <span class="pill"><b>${P.team}</b></span>
+      <span class="pill">${teamLogo(P.team)} <b>${P.team}</b></span>
       <span class="pill"><b>${P.position}</b></span>
       <span class="pill">${P.games} games · ${D.stats_season}</span>
       <span class="pill">${esc(nxt)}${D.opponent ? ` <b>vs ${D.opponent}</b>` : ''}</span>

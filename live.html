@@ -22,7 +22,7 @@
 </section></main>
 <script>
 document.addEventListener('DOMContentLoaded',async()=>{
- const {$,esc,fetchJSON,shell,weekControls,poll}=NFLHub;shell('live');
+ const {$,esc,fetchJSON,shell,weekControls,poll,headshot,teamLogo}=NFLHub;shell('live');
  let stop=null;
  await weekControls($('#controls'),loadGames);
  loadInjuries();loadNews();
@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   $('#games-title').innerHTML='Games'+(live?' <span class="tag live"><span class="livedot"></span> LIVE</span>':'');
   $('#games').innerHTML=d.games.length?d.games.map(g=>{
    const state=g.state==='in'?`<span class="tag live">${esc(g.status_detail||'LIVE')}</span>`:g.completed?'<span class="tag final">Final</span>':`<span class="tag pre">${new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'})}</span>`;
-   return `<a class="game-mini" style="display:block;color:inherit" href="/game/${g.game_id}?season=${g.season}"><div class="teams"><span>${esc(g.away_team)} ${g.away_score??''} @ ${esc(g.home_team)} ${g.home_score??''}</span>${state}</div><div class="meta"><span>${esc(g.venue||'')}</span></div></a>`;
+   return `<a class="game-mini" style="display:block;color:inherit" href="/game/${g.game_id}?season=${g.season}"><div class="teams"><span>${teamLogo(g.away_team)} ${esc(g.away_team)} ${g.away_score??''} @ ${teamLogo(g.home_team)} ${esc(g.home_team)} ${g.home_score??''}</span>${state}</div><div class="meta"><span>${esc(g.venue||'')}</span></div></a>`;
   }).join(''):'<div class="ai-empty">No games this week.</div>';
   if(stop){stop();stop=null}
   if(live)stop=poll(()=>loadGames(w,true),30000);
@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   const rows=(d.injuries||[]).filter(i=>i.player);
   $('#inj-meta').textContent=rows.length?`· ${rows.length} entries (ESPN)`:'';
   if(!rows.length){$('#injuries').innerHTML='<div class="ai-empty">No injury entries right now.</div>';return}
-  $('#injuries').innerHTML=`<table class="ai-data"><thead><tr><th>Team</th><th>Player</th><th>Pos</th><th>Status</th><th>Note</th></tr></thead><tbody>${rows.slice(0,60).map(i=>`<tr><td><span class="team-pill">${esc(i.team||'')}</span></td><td><b>${esc(i.player)}</b></td><td>${esc(i.position||'')}</td><td><span class="inj-status ${['Out','Injured Reserve','Doubtful','Suspended'].includes(i.status)?'bad':''}">${esc(i.status||'—')}</span></td><td class="muted" style="white-space:normal;min-width:220px">${esc(i.comment||'')}</td></tr>`).join('')}</tbody></table>`;
+  $('#injuries').innerHTML=`<table class="ai-data"><thead><tr><th>Team</th><th>Player</th><th>Pos</th><th>Status</th><th>Note</th></tr></thead><tbody>${rows.slice(0,60).map(i=>`<tr><td><span class="team-pill" title="${esc(i.team||'')}">${teamLogo(i.team)||esc(i.team||'')}</span></td><td><b>${esc(i.player)}</b></td><td>${esc(i.position||'')}</td><td><span class="inj-status ${['Out','Injured Reserve','Doubtful','Suspended'].includes(i.status)?'bad':''}">${esc(i.status||'—')}</span></td><td class="muted" style="white-space:normal;min-width:220px">${esc(i.comment||'')}</td></tr>`).join('')}</tbody></table>`;
  }
 
  async function loadNews(){

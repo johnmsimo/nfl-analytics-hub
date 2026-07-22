@@ -27,7 +27,8 @@ stat_query.py          StatMuse-style NL stat Q&A over the warehouse (self-teste
 routes/players.py       /api/player/<pid> — game logs + per-market projections vs next opponent + book lines
 routes/tracker_routes.py /api/tracker/* CRUD + performance + grade + closing-capture + live pace + settings
 static/theme.css        design system (volt-accent sister to the MLB hub; validated chart colors)
-static/app.js           shared shell: topbar/bottom-nav, persistent week state, bet-slip store
+static/app.js           shared shell: topbar/bottom-nav, persistent week state, bet-slip store,
+                        ESPN imagery helpers (headshot(pid)/teamLogo(abbr) via a.espncdn.com combiner)
 dashboard/props/game/player/tracker.html   pages on the shared shell, fetch /api/* client-side
 ```
 

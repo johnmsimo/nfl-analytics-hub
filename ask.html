@@ -28,7 +28,7 @@
 </section></main>
 <script>
 document.addEventListener('DOMContentLoaded',async()=>{
- const {$,esc,fetchJSON,shell}=NFLHub;shell('');
+ const {$,esc,fetchJSON,shell,headshot,teamLogo}=NFLHub;shell('');
  const params=new URLSearchParams(location.search);
  async function examples(){try{const d=await fetchJSON('/api/ask/examples');$('#examples').innerHTML=d.examples.map(e=>`<button data-q="${esc(e)}">${esc(e)}</button>`).join('');document.querySelectorAll('#examples button').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.q;go()})}catch{}}
  function cell(c){if(c&&typeof c==='object')return `<a href="${esc(c.link)}" style="color:#67e8f9">${esc(c.text)}</a>`;return esc(c)}
@@ -43,11 +43,11 @@ document.addEventListener('DOMContentLoaded',async()=>{
     return;
   }
   let h=`<div class="ai-card ai-cardpad">`;
-  h+=`<div class="ask-headline">${esc(d.headline)}</div>`;
+  h+=`<div style="display:flex;gap:14px;align-items:center">${d.player?headshot(d.player.id,'hs-hero'):''}<div class="ask-headline">${esc(d.headline)}</div></div>`;
   h+=`<div class="ask-interp">${esc(d.interpreted||'')}</div>`;
   if(d.summary&&d.kind==='player_stat')h+=`<div class="ask-summary"><span class="pill">Total <b>${d.summary.total}</b></span><span class="pill">Per game <b>${d.summary.per_game}</b></span><span class="pill">Games <b>${d.summary.games}</b></span></div>`;
   if(d.summary&&d.kind==='team')h+=`<div class="ask-summary"><span class="pill">Record <b>${esc(d.summary.record)}</b></span><span class="pill">PF/g <b>${d.summary.ppg}</b></span><span class="pill">PA/g <b>${d.summary.papg}</b></span></div>`;
-  if(d.table)h+=`<div class="ask-table"><table class="ai-data"><thead><tr>${d.table.columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${d.table.rows.map(r=>`<tr>${r.map(c=>`<td>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  if(d.table)h+=`<div class="ask-table"><table class="ai-data"><thead><tr>${d.table.columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${d.table.rows.map(r=>`<tr>${r.map((c,ci)=>`<td>${d.table.columns[ci]==='Team'?teamLogo(c)+' '+esc(c):cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const links=[];
   if(d.player)links.push(`<a href="/player/${esc(d.player.id)}">${esc(d.player.name)} profile →</a>`);
   if(d.game)links.push(`<a href="${esc(d.game.link)}">Game page →</a>`);

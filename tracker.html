@@ -42,7 +42,7 @@
 </main>
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-  const { $, esc, am, pc, fetchJSON, shell, poll } = NFLHub;
+  const { $, esc, am, pc, fetchJSON, shell, poll, headshot, teamLogo } = NFLHub;
   shell('tracker');
   const MK = { pass_yds:'Pass Yds', pass_tds:'Pass TDs', rush_yds:'Rush Yds', receptions:'Rec', rec_yds:'Rec Yds', anytime_td:'ATD', h2h:'ML', spread:'Spread', total:'Total' };
 
@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         any = true;
         rows += `<tr>
           <td class="muted">${d.slice(5)}</td>
-          <td>${e.playerId ? `<a href="/player/${esc(e.playerId)}" style="font-weight:700">${esc(e.player)}</a>` : `<b>${esc(e.player)}</b>`}<span class="muted"> ${esc(e.team || '')}</span></td>
+          <td><div class="pcell">${headshot(e.playerId)}<div>${e.playerId ? `<a href="/player/${esc(e.playerId)}" style="font-weight:700">${esc(e.player)}</a>` : `<b>${esc(e.player)}</b>`}<span class="muted"> ${e.team ? teamLogo(e.team) : ''} ${esc(e.team || '')}</span></div></div></td>
           <td>${esc(MK[e.marketKey] || e.marketKey)}</td>
           <td><span class="tag ${e.side === 'over' || e.side === 'home' ? 'over' : 'under'}">${e.marketKey === 'anytime_td' ? (e.side === 'over' ? 'YES' : 'NO') : (e.side || '') + (e.line != null && e.marketKey !== 'h2h' ? ' ' + e.line : '')}</span></td>
           <td class="num">${am(e.price)}</td>
