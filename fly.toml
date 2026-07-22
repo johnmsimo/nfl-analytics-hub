@@ -1,71 +1,71 @@
+# fly.toml app configuration file generated for nfl-analytics-hub on 2026-07-22T03:43:09Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'nfl-analytics-hub'
+primary_region = 'ewr'
 # Fly.io deployment configuration.
 # App names are globally unique; change this value if it is already taken.
 app = "nfl-analytics-hub"
 primary_region = "ewr"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [deploy]
-  release_command = "flask --app app db upgrade"
-  release_command_timeout = "10m"
-  strategy = "rolling"
+  strategy = 'rolling'
+  release_command = 'flask --app app db upgrade'
+  release_command_timeout = '10m0s'
 
 [env]
-  # security.py keys its production behavior (required SECRET_KEY/ADMIN_PASSWORD,
-  # Secure cookies, AUTH_DISABLED ignored) off APP_ENV — without this the
-  # deployed app runs with dev fallbacks including the admin/nfl-dev login.
-  APP_ENV = "production"
-  PORT = "8080"
-  DATA_DIR = "/app/data"
-  ENABLE_SCHEDULER = "false"
-  ENABLE_EXTERNAL_SYNC = "false"
-  WEATHER_PROVIDER = "nws"
-  ENABLED_PROVIDERS = "nflverse,nws"
+  APP_ENV = 'production'
+  DATA_DIR = '/app/data'
+  ENABLED_PROVIDERS = 'nflverse,nws'
+  ENABLE_EXTERNAL_SYNC = 'false'
+  ENABLE_SCHEDULER = 'false'
+  PORT = '8080'
+  WEATHER_PROVIDER = 'nws'
 
 [processes]
-  web = "gunicorn app:app -c gunicorn_conf.py"
+  web = 'gunicorn app:app -c gunicorn_conf.py'
   worker = "sh -c 'ENABLE_SCHEDULER=true python scheduler_service.py'"
 
-# The web machine's /app/data holds USER DATA that must survive restarts and
-# deploys: daily_tracker.json (picks + CLV history), odds_cache.json (paid
-# Odds API credits), and the SQLite fallback DB when DATABASE_URL is unset.
-# Create before first deploy:  fly volumes create nfl_data --region ewr --size 1
-# (The worker machine keeps ephemeral disk — its caches are rebuildable, and
-# with DATABASE_URL set to Postgres both processes share one real database.)
 [[mounts]]
-  source = "nfl_data"
-  destination = "/app/data"
-  processes = ["web"]
+  source = 'nfl_data'
+  destination = '/app/data'
+  processes = ['web']
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["web"]
+  processes = ['web']
 
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 40
+    type = 'requests'
     hard_limit = 60
+    soft_limit = 40
 
   [[http_service.checks]]
-    interval = "30s"
-    timeout = "10s"
-    grace_period = "90s"
-    method = "GET"
-    path = "/health"
+    interval = '30s'
+    timeout = '10s'
+    grace_period = '1m30s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  processes = ["web"]
-  memory = "1gb"
-  cpu_kind = "shared"
+  memory = '1gb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
+  processes = ['web']
 
 [[vm]]
-  processes = ["worker"]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
+  processes = ['worker']
