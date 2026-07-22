@@ -18,8 +18,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import requests
-
+import http_client
 import nfl_data
 
 API_BASE = "https://api.the-odds-api.com/v4"
@@ -85,10 +84,10 @@ def _get(path: str, **params):
     if not key:
         return None
     params = {"apiKey": key, **params}
-    r = requests.get(f"{API_BASE}{path}", params=params, timeout=25)
-    if r.status_code != 200:
-        raise RuntimeError(f"Odds API {r.status_code}: {r.text[:200]}")
-    return r.json()
+    response = http_client.get(f"{API_BASE}{path}", params=params)
+    if response.status_code != 200:
+        raise RuntimeError(f"Odds API {response.status_code}: {response.text[:200]}")
+    return response.json()
 
 
 # ----------------------------------------------------------------- game odds
