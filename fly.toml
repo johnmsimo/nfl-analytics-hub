@@ -15,7 +15,7 @@ primary_region = 'ewr'
 [env]
   APP_ENV = 'production'
   DATA_DIR = '/app/data'
-  ENABLED_PROVIDERS = 'nflverse,nws'
+  ENABLED_PROVIDERS = 'nflverse,nws,odds'
   ENABLE_EXTERNAL_SYNC = 'false'
   ENABLE_SCHEDULER = 'false'
   PORT = '8080'
