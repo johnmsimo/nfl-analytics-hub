@@ -11,8 +11,8 @@ primary_region = 'ewr'
 
 [deploy]
   strategy = 'rolling'
-  release_command = 'flask --app app db upgrade'
-  release_command_timeout = '10m0s'
+  
+  
 
 [env]
   APP_ENV = 'production'
