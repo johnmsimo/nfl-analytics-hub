@@ -1,71 +1,62 @@
-# fly.toml app configuration file generated for nfl-analytics-hub on 2026-07-22T03:43:09Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# fly.toml app configuration file for nfl-analytics-hub
 
-app = 'nfl-analytics-hub'
-primary_region = 'ewr'
-# Fly.io deployment configuration.
-# App names are globally unique; change this value if it is already taken.
 app = "nfl-analytics-hub"
 primary_region = "ewr"
 
 [build]
-  dockerfile = 'Dockerfile'
+  dockerfile = "Dockerfile"
 
 [deploy]
-  strategy = 'rolling'
-  release_command = 'flask --app app db upgrade'
-  release_command_timeout = '10m0s'
+  strategy = "rolling"
+  release_command = "flask --app app db upgrade"
+  release_command_timeout = "10m0s"
 
 [env]
-  APP_ENV = 'production'
-  DATA_DIR = '/app/data'
-  ENABLED_PROVIDERS = 'nflverse,nws'
-  ENABLE_EXTERNAL_SYNC = 'false'
-  ENABLE_SCHEDULER = 'false'
-  PORT = '8080'
-  WEATHER_PROVIDER = 'nws'
+  APP_ENV = "production"
+  DATA_DIR = "/app/data"
+  ENABLED_PROVIDERS = "nflverse,nws"
+  ENABLE_EXTERNAL_SYNC = "false"
+  ENABLE_SCHEDULER = "false"
+  PORT = "8080"
+  WEATHER_PROVIDER = "nws"
 
 [processes]
-  web = 'gunicorn app:app -c gunicorn_conf.py'
+  web = "gunicorn app:app -c gunicorn_conf.py"
   worker = "sh -c 'ENABLE_SCHEDULER=true python scheduler_service.py'"
 
 [[mounts]]
-  source = 'nfl_data'
-  destination = '/app/data'
-  processes = ['web']
+  source = "nfl_data"
+  destination = "/app/data"
+  processes = ["web"]
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'stop'
+  auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
-  processes = ['web']
+  processes = ["web"]
 
   [http_service.concurrency]
-    type = 'requests'
+    type = "requests"
     hard_limit = 60
     soft_limit = 40
 
   [[http_service.checks]]
-    interval = '30s'
-    timeout = '10s'
-    grace_period = '1m30s'
-    method = 'GET'
-    path = '/health'
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "1m30s"
+    method = "GET"
+    path = "/health"
 
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
+  memory = "1gb"
+  cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
-  processes = ['web']
+  processes = ["web"]
 
 [[vm]]
-  memory = '512mb'
-  cpu_kind = 'shared'
+  memory = "512mb"
+  cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
-  processes = ['worker']
+  processes = ["worker"]
