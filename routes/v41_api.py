@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
+from history_v412 import (
+    analyze_tendency_changes,
+    compare_seasons,
+    opponent_adjusted_splits,
+    track_role_transitions,
+)
 from matchup_v411 import compare_matchup_profiles, compare_tendencies, matchup_brief
 from scouting_v41 import cluster_team_styles, personnel_tendencies, player_similarity
 
@@ -34,11 +40,20 @@ def _matchup_profiles(payload):
     return metrics, None
 
 
+def _history_rules(payload):
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, list) or not metrics:
+        return None, "metrics must be a non-empty list"
+    if not all(isinstance(metric, dict) for metric in metrics):
+        return None, "each metric must be a JSON object"
+    return metrics, None
+
+
 @v41_bp.get("/capabilities")
 def capabilities():
     return jsonify(
         {
-            "version": "4.1.1",
+            "version": "4.1.2",
             "status": "active-development",
             "release": "advanced-scouting-intelligence",
             "features": {
@@ -51,6 +66,11 @@ def capabilities():
                 "profile_matchup_comparison": True,
                 "tendency_matchup_comparison": True,
                 "evidence_ranked_matchup_briefs": True,
+                "scouting_history": True,
+                "tendency_change_history": True,
+                "roster_role_transitions": True,
+                "opponent_adjusted_splits": True,
+                "season_over_season_comparisons": True,
             },
             "endpoints": {
                 "player_similarity": "/api/v4.1/scouting/player-similarity",
@@ -59,6 +79,12 @@ def capabilities():
                 "matchup_comparison": "/api/v4.1/scouting/matchups/compare",
                 "matchup_tendencies": "/api/v4.1/scouting/matchups/tendencies",
                 "matchup_brief": "/api/v4.1/scouting/matchups/brief",
+                "history_tendencies": "/api/v4.1/scouting/history/tendencies",
+                "history_roles": "/api/v4.1/scouting/history/roles",
+                "history_opponent_adjusted": (
+                    "/api/v4.1/scouting/history/opponent-adjusted"
+                ),
+                "history_seasons": "/api/v4.1/scouting/history/seasons",
             },
         }
     )
@@ -202,3 +228,95 @@ def scouting_matchup_brief():
         limit=limit,
     )
     return jsonify(matchup_brief(profile_result, tendency_result, limit=limit))
+
+
+@v41_bp.post("/scouting/history/tendencies")
+def scouting_history_tendencies():
+    payload = _json_object()
+    if payload is None or not isinstance(payload.get("snapshots"), list):
+        return jsonify({"error": "snapshots must be a list"}), 400
+    metrics = payload.get("metrics")
+    if metrics is not None and not isinstance(metrics, list):
+        return jsonify({"error": "metrics must be a list"}), 400
+    min_snaps = _integer(payload, "min_snaps", 10)
+    limit = _integer(payload, "limit", 10)
+    if min_snaps is None:
+        return jsonify({"error": "min_snaps must be an integer"}), 400
+    if limit is None:
+        return jsonify({"error": "limit must be an integer"}), 400
+    return jsonify(
+        analyze_tendency_changes(
+            payload["snapshots"],
+            metrics=metrics,
+            min_snaps=min_snaps,
+            limit=limit,
+        )
+    )
+
+
+@v41_bp.post("/scouting/history/roles")
+def scouting_history_roles():
+    payload = _json_object()
+    if payload is None or not isinstance(payload.get("snapshots"), list):
+        return jsonify({"error": "snapshots must be a list"}), 400
+    min_snaps = _integer(payload, "min_snaps", 1)
+    limit = _integer(payload, "limit", 25)
+    if min_snaps is None:
+        return jsonify({"error": "min_snaps must be an integer"}), 400
+    if limit is None:
+        return jsonify({"error": "limit must be an integer"}), 400
+    return jsonify(
+        track_role_transitions(
+            payload["snapshots"],
+            min_snaps=min_snaps,
+            limit=limit,
+        )
+    )
+
+
+@v41_bp.post("/scouting/history/opponent-adjusted")
+def scouting_history_opponent_adjusted():
+    payload = _json_object()
+    if payload is None or not isinstance(payload.get("splits"), list):
+        return jsonify({"error": "splits must be a list"}), 400
+    metrics, error = _history_rules(payload)
+    if error:
+        return jsonify({"error": error}), 400
+    min_sample = _integer(payload, "min_sample", 10)
+    limit = _integer(payload, "limit", 25)
+    if min_sample is None:
+        return jsonify({"error": "min_sample must be an integer"}), 400
+    if limit is None:
+        return jsonify({"error": "limit must be an integer"}), 400
+    return jsonify(
+        opponent_adjusted_splits(
+            payload["splits"],
+            metrics,
+            min_sample=min_sample,
+            limit=limit,
+        )
+    )
+
+
+@v41_bp.post("/scouting/history/seasons")
+def scouting_history_seasons():
+    payload = _json_object()
+    if payload is None or not isinstance(payload.get("seasons"), list):
+        return jsonify({"error": "seasons must be a list"}), 400
+    metrics, error = _history_rules(payload)
+    if error:
+        return jsonify({"error": error}), 400
+    min_sample = _integer(payload, "min_sample", 1)
+    limit = _integer(payload, "limit", 10)
+    if min_sample is None:
+        return jsonify({"error": "min_sample must be an integer"}), 400
+    if limit is None:
+        return jsonify({"error": "limit must be an integer"}), 400
+    return jsonify(
+        compare_seasons(
+            payload["seasons"],
+            metrics,
+            min_sample=min_sample,
+            limit=limit,
+        )
+    )
