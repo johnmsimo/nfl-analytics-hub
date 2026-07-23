@@ -171,6 +171,7 @@
     teams:'<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="3"/><path d="M2 21c1-5 3-7 6-7s5 2 6 7m0 0c.5-4 2-6 5-6 2 0 3 2 4 6"/></svg>',
     projections:'<svg viewBox="0 0 24 24"><path d="M3 18l5-5 4 3 8-10"/><path d="M15 6h5v5"/></svg>',
     analytics:'<svg viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m5 16v-7m5 7V7"/></svg>',
+    scouting:'<svg viewBox="0 0 24 24"><path d="M4 19l4-4 3 2 5-7 4 2"/><circle cx="8" cy="8" r="3"/><path d="M3 3l3 2m15-2l-3 2"/></svg>',
     rankings:'<svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 01-8 0z"/><path d="M12 13v5m-4 2h8M8 6H4v2c0 3 2 5 5 5m7-7h4v2c0 3-2 5-5 5"/></svg>',
     admin:'<svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>',
     settings:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5l2-1.5-2-3-2.4.7a7 7 0 00-1.4-.8L14.5 6h-5l-.7 2.9a7 7 0 00-1.4.8L5 9l-2 3 2 1.5a7 7 0 000 1L3 16l2 3 2.4-.7a7 7 0 001.4.8l.7 2.9h5l.7-2.9a7 7 0 001.4-.8L19 19l2-3-2-1.5a7 7 0 000-1z"/></svg>',
@@ -186,7 +187,7 @@
     const nav = [
       ['dashboard','Dashboard','/'],['ask','Ask','/ask'],['games','Games','/games'],['players','Players','/players'],
       ['teams','Teams','/teams'],['projections','Projections','/projections'],
-      ['live','Live Center','/live'],['analytics','Analytics','/analytics'],['rankings','Rankings','/rankings'],
+      ['live','Live Center','/live'],['analytics','Analytics','/analytics'],['scouting','Scouting','/scouting'],['rankings','Rankings','/rankings'],
       ['props','Props','/props'],['tracker','Tracker','/tracker'],['settings','Settings','/settings'],['admin','Data Ops','/admin/data']
     ];
     const sidebar=document.createElement('aside'); sidebar.className='ai-sidebar';
