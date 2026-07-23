@@ -36,9 +36,9 @@ def test_capabilities_expose_model_lifecycle_foundation():
     response = _client().get("/api/v4.3/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.3.0"
+    assert body["version"] == "4.3.1"
     assert body["features"]["conflict_safe_registration"] is True
-    assert body["features"]["champion_challenger_automation"] is False
+    assert body["features"]["champion_challenger_automation"] is True
     assert body["registry_contract_version"] == "4.3.0"
 
 

@@ -25,6 +25,12 @@ rules established by earlier releases.
 - `POST /api/v4.3/models/transitions/validate`
 - `POST /api/v4.3/models/promotion-policies/normalize`
 
+## v4.3.1 endpoints
+
+- `GET /api/v4.3/models/evaluations/metrics`
+- `POST /api/v4.3/models/evaluations/run`
+- `POST /api/v4.3/models/champion-challenger/select`
+
 ## v4.3.0 Registry foundation
 
 - Deterministic model and model-version identities derived from caller-supplied keys
@@ -42,6 +48,22 @@ rules established by earlier releases.
   minimum sample size, freshness, and required integrity checks
 - A bounded in-memory reference registry for deterministic tests and local development
 
+## v4.3.1 Automated evaluation and champion/challenger selection
+
+- Deterministic held-out evaluation records over caller-supplied observations and dataset
+  integrity metadata
+- Six allowlisted metrics: MAE, RMSE, Brier score, log loss, binary accuracy, and ten-bin
+  calibration error
+- Candidate/champion metric comparisons using the exact threshold, direction, minimum
+  improvement, sample-size, and all/any rules from the normalized promotion policy
+- Observed artifact-digest verification and serving/feature-schema compatibility gates
+- Bounded caller-supplied evidence for additional policy checks
+- Evidence digests and evaluation identities that detect post-evaluation mutation
+- Freshness-aware champion/challenger selection with explicit promote, retain, or no-selection
+  outcomes
+- Promotion-decision envelopes that are accepted directly by the v4.3.0 candidate-to-champion
+  transition contract
+
 ## Guardrails
 
 - Existing v3.x, v4.0, v4.1, and v4.2 contracts remain unchanged.
@@ -55,13 +77,17 @@ rules established by earlier releases.
   and lifecycle history are bounded.
 - Model versions cannot skip directly from registered to champion.
 - Champion promotion requires an explicit passing decision containing policy, evaluation, and
-  evidence identities; v4.3.0 does not fabricate or calculate that evidence.
+  evidence identities; v4.3.1 calculates that evidence only from supplied observations and
+  verification metadata.
 - Lifecycle events require an actor, reason, and monotonic timestamp.
 - Archived model versions are terminal.
-- Automated evaluation, champion/challenger selection, retraining, canary rollout, rollback,
-  durable registry storage, and operator approvals remain later increments.
+- Evaluation never mutates lifecycle state or silently promotes a model.
+- Unsupported policy metrics, altered evidence records, stale evaluations, schema mismatches,
+  and missing verification evidence fail visibly.
+- Retraining, canary rollout, rollback, durable registry storage, and operator approvals remain
+  later increments.
 
 ## Next increment
 
-v4.3.1 should add automated evaluation and champion/challenger selection on top of the stable
-v4.3.0 registry and promotion-policy contracts.
+v4.3.2 should add drift and performance retraining triggers, distributed retraining requests,
+shadow/canary rollout plans, and explicit rollback targets.
