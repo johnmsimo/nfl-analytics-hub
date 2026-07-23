@@ -32,4 +32,11 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pytest pytest-cov
-      - run: pytest -q tests/test_analytics_engine.py --cov=analytics_engine --cov-fail-under=85
+      - name: Run complete analytics coverage suite
+        run: >-
+          pytest -q
+          tests/test_analytics_engine.py
+          tests/test_game_intelligence_v31.py
+          tests/test_v31_platform.py
+          --cov=analytics_engine
+          --cov-fail-under=85
