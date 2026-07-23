@@ -13,16 +13,18 @@ v4.0 evolves the deployed analytics platform into a decision-support system that
 7. **Enterprise access** — organizations, roles, shared workspaces, audit trails, API keys, quotas, and public decision APIs.
 8. **Decision workspace** — scenario builder, ensemble comparison, evidence drawer, decision history, alerts, and mobile-first review flows.
 
-## First increment
+## Completed increments
 
-### Endpoints
+### Decision foundation
+
+#### Endpoints
 
 - `GET /api/v4/capabilities`
 - `POST /api/v4/decisions/ensemble`
 - `POST /api/v4/decisions/scenario`
 - `POST /api/v4/decisions/brief`
 
-### Capabilities
+#### Capabilities
 
 - Reliability weighting based on calibration, recency, and sample size
 - Automatic primary-model identification
@@ -33,14 +35,36 @@ v4.0 evolves the deployed analytics platform into a decision-support system that
 - Low/moderate/high decision-risk classification
 - Deterministic, framework-independent tests
 
+### Simulation laboratory
+
+#### Endpoints
+
+- `POST /api/v4/simulations/run`
+- `POST /api/v4/simulations/compare`
+- `POST /api/v4/simulations/sensitivity`
+
+#### Capabilities
+
+- Seeded correlated score simulation
+- Configurable scoring means, variance, and correlation
+- Home and away win probabilities
+- Projected score, margin, and total distributions
+- P10, P50, and P90 distribution bands
+- Reusable injury, weather, pace, turnover, lineup, defense, offense, and market adjustments
+- Bounded and validated scenario impacts
+- Named scenario comparison against a common baseline
+- One-factor-at-a-time sensitivity analysis
+- Ranked probability swings and local slopes
+
 ## Guardrails
 
 - v3.x API contracts remain unchanged.
-- Decisions are grounded in supplied structured model outputs; the engine does not invent source data.
+- Decisions and simulations are grounded in supplied structured inputs; the engine does not invent source data.
 - All scenario changes are explicit and returned with their reasons.
-- Reliability weights and model contributions remain inspectable.
-- The initial engine is dependency-light so it can later move into background workers without changing the public contract.
+- Reliability weights, model contributions, adjustments, seeds, and distribution summaries remain inspectable.
+- Simulation counts and scenario impacts are bounded to protect runtime and output stability.
+- The engine remains dependency-light so it can later move into background workers without changing the public contract.
 
 ## Next increment
 
-The next v4.0 increment should add a distribution-based simulation laboratory with reusable injury, weather, pace, turnover, and market scenarios, plus sensitivity analysis across the most important assumptions.
+The next v4.0 increment should add the AI insight layer: structured driver analysis, prediction-change explanations, upset alerts, confidence reasoning, evidence-linked recommendations, and decision-change history.
