@@ -200,6 +200,7 @@ def test_season_comparison_respects_metric_semantics():
     assert latest["trend"] == "improved"
     assert {metric["outcome"] for metric in latest["metrics"]} == {"improved"}
     assert result["entity"]["id"] == "A"
+    assert result["seasons_compared"] == 2
 
 
 def test_season_comparison_requires_two_eligible_seasons():
