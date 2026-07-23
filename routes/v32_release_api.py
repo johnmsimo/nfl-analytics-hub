@@ -7,10 +7,11 @@ from typing import Any
 from flask import Blueprint, jsonify, request, session
 
 from realtime_v32 import normalize_saved_filter
-from routes.v32_api import normalize_dashboard_preferences
 from routes.v4_api import v4_bp
+from routes.v32_api import normalize_dashboard_preferences
 from routes.v41_api import v41_bp
 from routes.v42_api import v42_bp
+from routes.v43_api import v43_bp
 from v32_release import (
     METRICS,
     PROFILE_STORE,
@@ -29,6 +30,7 @@ def _register_later_version_blueprints(state) -> None:
     state.app.register_blueprint(v4_bp)
     state.app.register_blueprint(v41_bp)
     state.app.register_blueprint(v42_bp)
+    state.app.register_blueprint(v43_bp)
 
 
 def _json_object() -> dict[str, Any] | None:
