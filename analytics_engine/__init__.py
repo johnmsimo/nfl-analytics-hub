@@ -1,4 +1,5 @@
 """Deterministic, dependency-light NFL analytics primitives."""
+from .intelligence_v31 import game_intelligence
 from .models import (
     drive_success_summary,
     epa_summary,
@@ -11,7 +12,13 @@ from .models import (
 )
 
 __all__ = [
-    "drive_success_summary", "epa_summary", "injury_impact",
-    "live_win_probability", "matchup_intelligence", "monte_carlo_game",
-    "player_similarity", "power_rating",
+    "game_intelligence",
+    "drive_success_summary",
+    "epa_summary",
+    "injury_impact",
+    "live_win_probability",
+    "matchup_intelligence",
+    "monte_carlo_game",
+    "player_similarity",
+    "power_rating",
 ]
