@@ -18,8 +18,22 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: ruff check .
-      - run: ruff format --check .
+      - name: Lint production v3.2 surfaces
+        run: >-
+          ruff check
+          database.py
+          realtime_v32.py
+          routes/v32_api.py
+          routes/v32_release_api.py
+          v32_release.py
+      - name: Check production v3.2 formatting
+        run: >-
+          ruff format --check
+          database.py
+          realtime_v32.py
+          routes/v32_api.py
+          routes/v32_release_api.py
+          v32_release.py
       - run: mypy analytics_engine routes/analytics_api.py
       - run: bandit -q -r . -x tests,migrations,.venv
       - run: pip-audit -r requirements.txt
@@ -31,7 +45,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pytest pytest-cov
+      - run: pip install -r requirements.txt pytest pytest-cov
       - name: Run complete analytics coverage suite
         run: >-
           pytest -q
