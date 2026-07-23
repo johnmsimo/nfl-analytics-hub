@@ -17,6 +17,13 @@ v3.1 introduces a versioned intelligence platform built on deterministic, explai
 
 All modules use the existing `/api/v3/analytics` namespace. Discover them with `GET /api/v3/analytics/capabilities`.
 
+## Validation checklist
+
+- Repository-wide Python syntax compilation
+- Deterministic engine smoke tests
+- Unit coverage for live, player, team, betting, assistant, and watchlist modules
+- GitHub CI and quality/security workflows
+
 ## Safety
 
 Betting outputs are analytical signals, not guarantees or financial advice. The assistant reports whether an answer is grounded in supplied context.
