@@ -18,6 +18,10 @@ v4.1 builds a transparent scouting layer on the v4.0 decision, simulation, and i
 - `POST /api/v4.1/scouting/matchups/compare`
 - `POST /api/v4.1/scouting/matchups/tendencies`
 - `POST /api/v4.1/scouting/matchups/brief`
+- `POST /api/v4.1/scouting/history/tendencies`
+- `POST /api/v4.1/scouting/history/roles`
+- `POST /api/v4.1/scouting/history/opponent-adjusted`
+- `POST /api/v4.1/scouting/history/seasons`
 
 ## v4.1.0 scouting foundation
 
@@ -40,19 +44,34 @@ v4.1 builds a transparent scouting layer on the v4.0 decision, simulation, and i
 - Usage-aware opportunity and risk rankings
 - Bounded, evidence-ranked matchup briefs with deterministic summaries and confidence
 
+## v4.1.2 scouting history
+
+- Earliest-to-latest tendency change analysis across caller-ordered periods
+- Ranked usage, efficiency, explosiveness, and yards-per-play changes
+- Observed team, role, and material snap-share transitions by player
+- Current-roster snapshots derived from the latest supplied observation
+- Opponent-adjusted splits using explicit caller-supplied baseline metrics
+- Direction-aware adjustment for metrics where lower values are better
+- Consecutive season comparisons with inspectable values and normalized changes
+- Visible exclusions for small samples, missing evidence, and incomplete history
+
 ## Guardrails
 
-- Existing v3.x, v4.0, and v4.1.0 contracts remain unchanged.
+- Existing v3.x, v4.0, v4.1.0, and v4.1.1 contracts remain unchanged.
 - Scouting and matchup results use only supplied structured inputs; the engine does not invent player, team, tracking, play, or opponent data.
 - Matchup semantics are explicit: callers name the offense and defense metrics, normalization scale, direction, and optional weight.
 - Defense tendency metrics are declared as rates allowed in the tendency response.
 - Every matchup claim includes the exact compared values, normalized edge, sample context, and evidence score.
 - Missing metrics reduce coverage and are reported instead of being silently imputed.
 - Unknown sample support is reported as unknown and conservatively discounted in evidence ranking.
+- History ordering uses explicit `sort_key`, season/week values, or stable input order.
+- Opponent adjustments require an explicit baseline for every compared metric.
+- Roster and role transitions report only observed changes between supplied snapshots.
+- Season comparisons require explicit metric direction and never infer improvement semantics.
 - Small samples remain visible through snap counts and caller-selected minimum thresholds.
 - Ranking and tie-breaking are deterministic, and result sizes are bounded.
 - The engine remains framework-independent and dependency-light.
 
 ## Next increment
 
-v4.1.2 should add time-aware scouting history, including tendency changes, roster and role transitions, opponent-adjusted splits, and season-over-season comparisons.
+v4.1.3 should add the scouting workspace: player comparison, team-style maps, tendency explorers, matchup cards, saved reports, and mobile review flows.
