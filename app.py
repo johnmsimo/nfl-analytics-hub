@@ -125,6 +125,11 @@ def page_analytics():
     return _page_response("analytics.html")
 
 
+@app.route("/scouting")
+def page_scouting():
+    return _page_response("scouting.html")
+
+
 @app.route("/rankings")
 def page_rankings():
     return _page_response("rankings.html")

@@ -22,6 +22,9 @@ v4.1 builds a transparent scouting layer on the v4.0 decision, simulation, and i
 - `POST /api/v4.1/scouting/history/roles`
 - `POST /api/v4.1/scouting/history/opponent-adjusted`
 - `POST /api/v4.1/scouting/history/seasons`
+- `GET /api/v4.1/scouting/workspace`
+- `POST /api/v4.1/scouting/workspace/reports/normalize`
+- `POST /api/v4.1/scouting/workspace/reports/review`
 
 ## v4.1.0 scouting foundation
 
@@ -55,9 +58,18 @@ v4.1 builds a transparent scouting layer on the v4.0 decision, simulation, and i
 - Consecutive season comparisons with inspectable values and normalized changes
 - Visible exclusions for small samples, missing evidence, and incomplete history
 
+## v4.1.3 scouting workspace
+
+- Responsive workspace at `/scouting` for player, team-style, tendency, matchup, and history analysis
+- Caller-editable JSON requests that preserve the explicit v4.1 engine contracts
+- Deterministic saved-report envelopes with bounded titles, tags, sources, and payload sizes
+- Browser-local saved reports with explicit storage disclosure and no implied server persistence
+- Pinned-first, recency-ordered mobile report review with compact evidence counts
+- Shared navigation integration without changing any earlier scouting calculation
+
 ## Guardrails
 
-- Existing v3.x, v4.0, v4.1.0, and v4.1.1 contracts remain unchanged.
+- Existing v3.x, v4.0, v4.1.0, v4.1.1, and v4.1.2 contracts remain unchanged.
 - Scouting and matchup results use only supplied structured inputs; the engine does not invent player, team, tracking, play, or opponent data.
 - Matchup semantics are explicit: callers name the offense and defense metrics, normalization scale, direction, and optional weight.
 - Defense tendency metrics are declared as rates allowed in the tendency response.
@@ -70,8 +82,9 @@ v4.1 builds a transparent scouting layer on the v4.0 decision, simulation, and i
 - Season comparisons default to higher-is-better unless a metric is explicitly marked lower-is-better.
 - Small samples remain visible through snap counts and caller-selected minimum thresholds.
 - Ranking and tie-breaking are deterministic, and result sizes are bounded.
-- The engine remains framework-independent and dependency-light.
+- Saved reports remain in the current browser unless the user exports them; the API normalizes reports but does not claim server persistence.
+- The workspace engine remains framework-independent and dependency-light.
 
 ## Next increment
 
-v4.1.3 should add the scouting workspace: player comparison, team-style maps, tendency explorers, matchup cards, saved reports, and mobile review flows.
+v4.1 is complete with the scouting workspace. Scope the next version from deployed usage feedback and keep it behind a new versioned contract.

@@ -11,6 +11,11 @@ from history_v412 import (
 )
 from matchup_v411 import compare_matchup_profiles, compare_tendencies, matchup_brief
 from scouting_v41 import cluster_team_styles, personnel_tendencies, player_similarity
+from workspace_v413 import (
+    build_review_queue,
+    normalize_workspace_report,
+    workspace_manifest,
+)
 
 v41_bp = Blueprint("v41_api", __name__, url_prefix="/api/v4.1")
 
@@ -53,7 +58,7 @@ def _history_rules(payload):
 def capabilities():
     return jsonify(
         {
-            "version": "4.1.2",
+            "version": "4.1.3",
             "status": "active-development",
             "release": "advanced-scouting-intelligence",
             "features": {
@@ -71,6 +76,9 @@ def capabilities():
                 "roster_role_transitions": True,
                 "opponent_adjusted_splits": True,
                 "season_over_season_comparisons": True,
+                "scouting_workspace": True,
+                "saved_scouting_reports": True,
+                "mobile_report_review": True,
             },
             "endpoints": {
                 "player_similarity": "/api/v4.1/scouting/player-similarity",
@@ -85,6 +93,13 @@ def capabilities():
                     "/api/v4.1/scouting/history/opponent-adjusted"
                 ),
                 "history_seasons": "/api/v4.1/scouting/history/seasons",
+                "workspace": "/api/v4.1/scouting/workspace",
+                "workspace_report_normalize": (
+                    "/api/v4.1/scouting/workspace/reports/normalize"
+                ),
+                "workspace_report_review": (
+                    "/api/v4.1/scouting/workspace/reports/review"
+                ),
             },
         }
     )
@@ -320,3 +335,35 @@ def scouting_history_seasons():
             limit=limit,
         )
     )
+
+
+@v41_bp.get("/scouting/workspace")
+def scouting_workspace():
+    return jsonify(workspace_manifest())
+
+
+@v41_bp.post("/scouting/workspace/reports/normalize")
+def scouting_workspace_report_normalize():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "report must be a JSON object"}), 400
+    try:
+        result = normalize_workspace_report(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v41_bp.post("/scouting/workspace/reports/review")
+def scouting_workspace_report_review():
+    payload = _json_object()
+    if payload is None or not isinstance(payload.get("reports"), list):
+        return jsonify({"error": "reports must be a list"}), 400
+    limit = _integer(payload, "limit", 25)
+    if limit is None:
+        return jsonify({"error": "limit must be an integer"}), 400
+    try:
+        result = build_review_queue(payload["reports"], limit=limit)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)

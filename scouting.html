@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Scouting Workspace · NFL Analytics Hub</title>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/app.js" defer></script>
+  <style>
+    .scout-tabs{display:flex;gap:8px;overflow:auto;padding-bottom:4px;margin-bottom:16px}
+    .scout-tabs button{white-space:nowrap;border:1px solid var(--b);background:var(--card);color:var(--mu);padding:10px 14px;border-radius:10px;font-weight:700}
+    .scout-tabs button.on{color:var(--t);border-color:var(--b-strong);background:var(--card3)}
+    .scout-layout{display:grid;grid-template-columns:minmax(300px,430px) minmax(0,1fr);gap:16px}
+    .scout-form{display:grid;gap:12px;align-content:start}
+    .scout-form label{display:grid;gap:6px;color:var(--mu);font-size:12px;font-weight:700}
+    .scout-form input,.scout-form textarea,.scout-form select{width:100%;border:1px solid var(--b);background:var(--bg);color:var(--t);border-radius:9px;padding:10px;font:inherit}
+    .scout-form textarea{min-height:260px;resize:vertical;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .scout-actions{display:flex;gap:8px;flex-wrap:wrap}
+    .scout-output{min-height:480px;overflow:auto}
+    .scout-output pre{white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#bdd0ef;margin:0}
+    .scout-note{padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.04);font-size:12px;color:var(--mu)}
+    .saved-grid{display:grid;gap:10px}
+    .saved-card{display:grid;grid-template-columns:1fr auto;gap:8px;padding:13px;border:1px solid var(--b);border-radius:11px;background:var(--card2)}
+    .saved-card small{display:block;color:var(--mu);margin-top:4px}
+    .saved-card .scout-actions{justify-content:end}
+    .scout-badge{display:inline-flex;padding:3px 7px;border-radius:999px;background:rgba(139,92,246,.16);color:#bca8ff;font-size:10px;font-weight:800}
+    @media(max-width:900px){.scout-layout{grid-template-columns:1fr}.scout-output{min-height:360px}.scout-form textarea{min-height:210px}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <section class="ai-page">
+    <header class="ai-pagehead">
+      <div>
+        <h1>Scouting Workspace</h1>
+        <p>Compare players, map team styles, explore tendencies, build matchup cards, and review saved reports.</p>
+      </div>
+      <div class="scout-badge">v4.1.3</div>
+    </header>
+    <nav class="scout-tabs" id="tabs" aria-label="Scouting tools"></nav>
+    <div class="scout-layout">
+      <form class="ai-card ai-cardpad scout-form" id="workspace-form">
+        <label>Report title<input id="report-title" maxlength="120" required></label>
+        <label>Analysis request (JSON)<textarea id="payload" spellcheck="false" required></textarea></label>
+        <div class="scout-note" id="method-note"></div>
+        <div class="scout-actions">
+          <button class="btn primary" type="submit">Run analysis</button>
+          <button class="btn" type="button" id="save-report" disabled>Save report</button>
+        </div>
+      </form>
+      <section class="ai-card ai-cardpad scout-output" aria-live="polite">
+        <h3 id="output-title">Analysis result</h3>
+        <div id="output"><div class="ai-empty">Choose a tool and run an analysis. Results use only the data you supply.</div></div>
+      </section>
+    </div>
+  </section>
+</main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+ const {$,esc,fetchJSON,shell,toast}=NFLHub;shell('scouting');
+ const STORE='nflhub.scouting.reports.v413';
+ const examples={
+  'player-comparison':{title:'Player comparison',endpoint:'/api/v4.1/scouting/player-similarity',payload:{target:{player_id:'TARGET',yards_per_route:0,success_rate:0,sample_size:0},candidates:[],metrics:['yards_per_route','success_rate'],limit:5}},
+  'team-style-map':{title:'Team-style map',endpoint:'/api/v4.1/scouting/team-styles/cluster',payload:{teams:[],metrics:['pass_rate','success_rate','explosive_rate'],cluster_count:3}},
+  'tendency-explorer':{title:'Tendency explorer',endpoint:'/api/v4.1/scouting/tendencies',payload:{plays:[],min_snaps:10}},
+  'matchup-card':{title:'Matchup card',endpoint:'/api/v4.1/scouting/matchups/brief',payload:{offense:{team_id:'OFF',sample_size:0},defense:{team_id:'DEF',sample_size:0},metrics:[],offense_tendencies:[],defense_tendencies:[],limit:5}},
+  'history-review':{title:'Tendency history',endpoint:'/api/v4.1/scouting/history/tendencies',payload:{snapshots:[],metrics:['usage_rate','success_rate'],min_snaps:10,limit:10}},
+  'saved':{title:'Saved reports'}
+ };
+ const labels={'player-comparison':'Players','team-style-map':'Team styles','tendency-explorer':'Tendencies','matchup-card':'Matchups','history-review':'History','saved':'Saved reports'};
+ let active='player-comparison',latest=null,manifest=null;
+ try{manifest=await fetchJSON('/api/v4.1/scouting/workspace')}catch(e){manifest={panels:Object.keys(examples).filter(x=>x!=='saved').map(id=>({id}))}}
+ const ids=[...manifest.panels.map(x=>x.id),'saved'];
+ $('#tabs').innerHTML=ids.map(id=>`<button type="button" data-id="${id}">${labels[id]}</button>`).join('');
+ $('#tabs').onclick=e=>{const b=e.target.closest('button[data-id]');if(b)activate(b.dataset.id)};
+ $('#workspace-form').onsubmit=run;
+ $('#save-report').onclick=save;
+ activate(active);
+ function activate(id){
+  active=id;latest=null;$('#save-report').disabled=true;
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.id===id));
+  if(id==='saved'){renderSaved();return}
+  $('#workspace-form').hidden=false;
+  $('#report-title').value=examples[id].title;
+  $('#payload').value=JSON.stringify(examples[id].payload,null,2);
+  $('#method-note').textContent='Endpoint: '+examples[id].endpoint+' · Caller-supplied data only; zero-value placeholders are not treated as real observations.';
+  $('#output-title').textContent=examples[id].title+' result';
+  $('#output').innerHTML='<div class="ai-empty">Ready to analyze supplied JSON.</div>';
+ }
+ async function run(e){
+  e.preventDefault();let payload;
+  try{payload=JSON.parse($('#payload').value)}catch(err){toast('Request JSON is invalid');return}
+  $('#output').innerHTML='<div class="ai-empty">Running analysis…</div>';
+  try{
+   const result=await fetchJSON(examples[active].endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+   latest={type:active,title:$('#report-title').value.trim(),source_endpoint:examples[active].endpoint,result};
+   $('#output').innerHTML=`<pre>${esc(JSON.stringify(result,null,2))}</pre>`;
+   $('#save-report').disabled=false;
+  }catch(err){$('#output').innerHTML=`<div class="ai-empty">${esc(err.message)}</div>`}
+ }
+ function reports(){try{const rows=JSON.parse(localStorage.getItem(STORE)||'[]');return Array.isArray(rows)?rows:[]}catch(e){return[]}}
+ async function save(){
+  if(!latest)return;
+  const now=new Date().toISOString();
+  try{
+   const normalized=await fetchJSON('/api/v4.1/scouting/workspace/reports/normalize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...latest,created_at:now,updated_at:now})});
+   const rows=reports().filter(r=>r.report_id!==normalized.report.report_id);rows.unshift(normalized.report);localStorage.setItem(STORE,JSON.stringify(rows.slice(0,50)));toast('Scouting report saved');
+  }catch(err){toast(err.message)}
+ }
+ async function renderSaved(){
+  $('#workspace-form').hidden=true;$('#output-title').textContent='Saved report review';
+  const rows=reports();
+  if(!rows.length){$('#output').innerHTML='<div class="ai-empty">No saved reports in this browser.</div>';return}
+  let queue={queue:rows};
+  try{queue=await fetchJSON('/api/v4.1/scouting/workspace/reports/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reports:rows,limit:50})})}catch(e){}
+  $('#output').innerHTML=`<div class="saved-grid">${queue.queue.map(r=>`<article class="saved-card"><div><span class="scout-badge">${esc(r.type)}</span><b style="display:block;margin-top:6px">${esc(r.title)}</b><small>${esc(r.updated_at||'No timestamp')} · ${r.evidence_count??'—'} evidence items</small></div><div class="scout-actions"><button class="btn" data-open="${esc(r.report_id)}">Open</button><button class="btn" data-delete="${esc(r.report_id)}">Delete</button></div></article>`).join('')}</div>`;
+  $('#output').onclick=e=>{const open=e.target.closest('[data-open]'),del=e.target.closest('[data-delete]');if(open){const report=rows.find(r=>r.report_id===open.dataset.open);$('#output-title').textContent=report.title;$('#output').innerHTML=`<pre>${esc(JSON.stringify(report.result,null,2))}</pre>`}if(del){localStorage.setItem(STORE,JSON.stringify(rows.filter(r=>r.report_id!==del.dataset.delete)));renderSaved()}};
+ }
+});
+</script>
+</body>
+</html>

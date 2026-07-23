@@ -24,11 +24,11 @@ def _payload():
     }
 
 
-def test_v412_capabilities_preserve_matchup_endpoints():
+def test_v413_capabilities_preserve_matchup_endpoints():
     response = _client().get("/api/v4.1/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.1.2"
+    assert body["version"] == "4.1.3"
     assert body["features"]["matchup_intelligence"] is True
     assert body["endpoints"]["matchup_brief"].endswith("/matchups/brief")
 
