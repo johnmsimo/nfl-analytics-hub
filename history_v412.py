@@ -577,7 +577,7 @@ def compare_seasons(
         },
         "min_sample": minimum,
         "seasons_received": len(valid_rows),
-        "seasons_compared": len(comparisons) + (1 if comparisons else 0),
+        "seasons_compared": len(eligible),
         "comparison_count": len(comparisons),
         "latest_comparison": comparisons[-1] if comparisons else None,
         "comparisons": comparisons,
