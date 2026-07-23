@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request, session
 
 from realtime_v32 import normalize_saved_filter
 from routes.v32_api import normalize_dashboard_preferences
+from routes.v4_api import v4_bp
 from v32_release import (
     METRICS,
     PROFILE_STORE,
@@ -18,6 +19,12 @@ from v32_release import (
 )
 
 v32_release_bp = Blueprint("v32_release_api", __name__, url_prefix="/api/v3.2")
+
+
+@v32_release_bp.record_once
+def _register_v4_blueprint(state) -> None:
+    """Attach the versioned v4 API while preserving the thin app entrypoint."""
+    state.app.register_blueprint(v4_bp)
 
 
 def _json_object() -> dict[str, Any] | None:
