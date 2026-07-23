@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>NFL Analytics Hub v3.2</title>
+  <style>
+    :root{color-scheme:dark;--bg:#07101f;--panel:#101b2e;--line:#263752;--text:#f4f7fb;--muted:#9fb0c8;--accent:#6ce5c2;--warn:#ffbf69}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#17345a 0,transparent 36%),var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,sans-serif}
+    header{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#07101fe8;border-bottom:1px solid var(--line);backdrop-filter:blur(16px)}
+    h1{font-size:18px;margin:0}.badge{font-size:12px;padding:5px 9px;border:1px solid #3c5b79;border-radius:999px;color:var(--accent)}
+    main{max-width:1280px;margin:auto;padding:18px}.hero{display:grid;gap:12px;margin-bottom:16px}.hero h2{font-size:clamp(25px,5vw,44px);margin:0;max-width:760px}.hero p{color:var(--muted);margin:0;max-width:700px}
+    .toolbar{display:flex;gap:8px;overflow:auto;padding:4px 0 14px}.toolbar button{white-space:nowrap;border:1px solid var(--line);background:#102038;color:var(--text);padding:10px 13px;border-radius:10px}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.card{grid-column:span 4;background:linear-gradient(145deg,#12213a,#0c1729);border:1px solid var(--line);border-radius:16px;padding:15px;min-height:170px;box-shadow:0 16px 40px #0004}
+    .wide{grid-column:span 8}.full{grid-column:1/-1}.card h3{margin:0 0 10px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.metric{font-size:31px;font-weight:750}.good{color:var(--accent)}.warn{color:var(--warn)}
+    .event{padding:9px 0;border-bottom:1px solid #20304a}.event:last-child{border:0}.row{display:flex;justify-content:space-between;gap:12px}.small{font-size:12px;color:var(--muted)}
+    input,select,textarea{width:100%;background:#081426;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px;margin:4px 0 8px}button.primary{background:var(--accent);color:#06231d;border:0;font-weight:700}
+    pre{white-space:pre-wrap;margin:0;color:#c9d6e8}.status{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--accent);box-shadow:0 0 12px var(--accent);margin-right:7px}
+    @media(max-width:900px){.card,.wide{grid-column:span 6}}@media(max-width:620px){main{padding:12px}.card,.wide{grid-column:1/-1}header{padding:12px}.hero h2{font-size:28px}.grid{gap:10px}.card{min-height:auto}.toolbar{scrollbar-width:none}}
+  </style>
+</head>
+<body>
+<header><h1>NFL Analytics Hub</h1><span class="badge"><span class="status"></span>v3.2 live</span></header>
+<main>
+  <section class="hero"><h2>Real-time football intelligence, personalized.</h2><p>Live events, model quality, saved workspaces, and grounded reports in one responsive command center.</p></section>
+  <nav class="toolbar" aria-label="Workspace views"><button>Live Center</button><button>My Watchlist</button><button>Model Lab</button><button>Search</button><button>Reports</button><button>Settings</button></nav>
+  <section class="grid">
+    <article class="card wide"><h3>Live intelligence stream</h3><div id="stream"><div class="event"><div class="row"><b>Connecting to live topics…</b><span class="small">SSE</span></div></div></div></article>
+    <article class="card"><h3>Provider freshness</h3><div class="metric good" id="freshness">Healthy</div><p class="small">Scores, odds, injuries, and model updates</p></article>
+    <article class="card"><h3>Model quality</h3><div class="metric" id="brier">—</div><p class="small">Brier score from the latest calibration sample</p></article>
+    <article class="card"><h3>Drift status</h3><div class="metric good" id="drift">Low</div><p class="small">Standardized feature-distribution shift</p></article>
+    <article class="card"><h3>Saved workspace</h3><p class="small">Layouts, filters, density, refresh cadence, and watchlists persist to your authenticated profile.</p><button class="primary" onclick="saveWorkspace()">Save current layout</button></article>
+    <article class="card full"><h3>Grounded report studio</h3><div class="grid"><div class="card" style="grid-column:span 4;border:0;padding:0;box-shadow:none"><select id="kind"><option value="preview">Game preview</option><option value="recap">Game recap</option><option value="weekly">Weekly report</option></select><input id="title" placeholder="Report title"><textarea id="summary" rows="4" placeholder="Grounded factual summary"></textarea><button class="primary" onclick="generateReport()">Generate report</button></div><div class="card" style="grid-column:span 8;border:0;padding:0;box-shadow:none"><pre id="report">Generated report will appear here.</pre></div></div></article>
+  </section>
+</main>
+<script>
+const stream=document.getElementById('stream');
+function addEvent(type,data){const node=document.createElement('div');node.className='event';node.innerHTML=`<div class="row"><b>${type.replaceAll('_',' ')}</b><span class="small">${new Date().toLocaleTimeString()}</span></div><div class="small">${JSON.stringify(data)}</div>`;stream.prepend(node);while(stream.children.length>8)stream.lastChild.remove()}
+try{const source=new EventSource('/api/v3.2/events?topics=scores,odds,injuries,models,system');['score_update','odds_update','injury_update','model_update','system','heartbeat','connected'].forEach(name=>source.addEventListener(name,e=>addEvent(name,JSON.parse(e.data))));source.onerror=()=>addEvent('connection_status',{status:'reconnecting'})}catch(error){addEvent('connection_error',{message:error.message})}
+async function saveWorkspace(){const response=await fetch('/api/v3.2/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({preferences:{density:innerWidth<620?'compact':'comfortable',refresh_seconds:15},layout:{workspace:'v32-mobile'},saved_filters:[],watchlist:[]})});addEvent('profile_saved',{status:response.status})}
+async function generateReport(){const payload={kind:document.getElementById('kind').value,context:{title:document.getElementById('title').value,summary:document.getElementById('summary').value,key_factors:[]}};const response=await fetch('/api/v3.2/reports/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();document.getElementById('report').textContent=data.body||data.error||JSON.stringify(data,null,2)}
+fetch('/api/v3.2/observability').then(r=>r.json()).then(data=>{const providers=Object.values(data.provider_freshness||{});if(providers.some(p=>p.age_seconds>300)){const f=document.getElementById('freshness');f.textContent='Degraded';f.className='metric warn'}}).catch(()=>{});
+</script>
+</body>
+</html>
