@@ -6,6 +6,12 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from evaluation_v431 import (
+    evaluation_manifest,
+    evaluation_metric_catalog,
+    run_held_out_evaluation,
+    select_champion_challenger,
+)
 from lifecycle_v43 import (
     lifecycle_manifest,
     normalize_model_version,
@@ -23,16 +29,27 @@ def _json_object() -> dict[str, Any] | None:
 
 @v43_bp.get("/capabilities")
 def capabilities():
-    manifest = lifecycle_manifest()
+    registry = lifecycle_manifest()
+    evaluation = evaluation_manifest()
     return jsonify(
         {
-            **manifest,
-            "registry_contract_version": manifest["version"],
+            **evaluation,
+            "features": {
+                **registry["features"],
+                **evaluation["features"],
+                "automated_evaluation": True,
+                "champion_challenger_automation": True,
+            },
+            "registry_contract_version": registry["version"],
+            "evaluation_contract_version": evaluation["version"],
             "endpoints": {
                 "capabilities": "/api/v4.3/capabilities",
                 "model_version_normalize": "/api/v4.3/models/versions/normalize",
                 "transition_validate": "/api/v4.3/models/transitions/validate",
                 "promotion_policy_normalize": ("/api/v4.3/models/promotion-policies/normalize"),
+                "evaluation_metrics": "/api/v4.3/models/evaluations/metrics",
+                "evaluation_run": "/api/v4.3/models/evaluations/run",
+                "champion_challenger_select": ("/api/v4.3/models/champion-challenger/select"),
             },
         }
     )
@@ -79,6 +96,41 @@ def normalize_registry_promotion_policy():
         return jsonify({"error": "promotion policy must be a JSON object"}), 400
     try:
         result = normalize_promotion_policy(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v43_bp.get("/models/evaluations/metrics")
+def evaluation_metrics():
+    return jsonify(evaluation_metric_catalog())
+
+
+@v43_bp.post("/models/evaluations/run")
+def run_model_evaluation():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "evaluation must be a JSON object"}), 400
+    try:
+        result = run_held_out_evaluation(
+            payload,
+            evaluated_at=payload.get("evaluated_at"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v43_bp.post("/models/champion-challenger/select")
+def select_model_champion():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "selection must be a JSON object"}), 400
+    try:
+        result = select_champion_challenger(
+            payload,
+            decided_at=payload.get("decided_at"),
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(result)
