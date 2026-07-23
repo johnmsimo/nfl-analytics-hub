@@ -1,12 +1,15 @@
-"""NFL Analytics Hub v3.2 real-time and personalization API."""
+"""NFL Analytics Hub v3.2 real-time, personalization, and discovery API."""
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Iterator, Mapping
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+
+from realtime_v32 import BROKER, normalize_saved_filter, normalize_topics, search_entities
 
 v32_bp = Blueprint("v32_api", __name__, url_prefix="/api/v3.2")
 
@@ -88,21 +91,67 @@ def heartbeat_stream(interval_seconds: int = 15, max_events: int | None = None) 
         )
 
 
+def broker_stream(
+    topics: set[str],
+    last_event_id: str | None = None,
+    heartbeat_seconds: int = 15,
+    max_cycles: int | None = None,
+) -> Iterator[str]:
+    """Yield replayable broker events and periodic heartbeats."""
+    yield build_event(
+        "connected",
+        {
+            "service": "nfl-analytics-hub",
+            "version": "3.2",
+            "transport": "sse",
+            "topics": sorted(topics),
+        },
+        "0",
+    )
+    cursor = last_event_id
+    cycles = 0
+    while max_cycles is None or cycles < max_cycles:
+        events = BROKER.events_after(cursor, topics)
+        if events:
+            for item in events:
+                cursor = item.event_id
+                payload = dict(item.data)
+                payload.update({"topic": item.topic, "created_at": item.created_at})
+                yield build_event(item.event, payload, item.event_id)
+        else:
+            yield build_event("heartbeat", {"timestamp": int(time.time())})
+        cycles += 1
+        if max_cycles is None or cycles < max_cycles:
+            BROKER.wait(heartbeat_seconds)
+
+
+def _publish_authorized() -> bool:
+    configured = os.environ.get("V32_PUBLISH_TOKEN", "")
+    supplied = request.headers.get("X-V32-Publish-Token", "")
+    return bool(configured) and supplied == configured
+
+
 @v32_bp.get("/capabilities")
 def capabilities():
     return jsonify(
         {
             "version": "3.2",
-            "status": "foundation",
+            "status": "active-development",
             "features": {
                 "realtime_transport": "server-sent-events",
+                "replayable_event_ids": True,
+                "topic_subscriptions": True,
                 "personalized_dashboard": True,
-                "saved_layout_contract": True,
+                "saved_filter_contract": True,
+                "cross_entity_search": True,
                 "mobile_first_contract": True,
             },
             "endpoints": {
                 "events": "/api/v3.2/events",
+                "publish": "/api/v3.2/events/publish",
                 "preferences": "/api/v3.2/preferences/normalize",
+                "saved_filter": "/api/v3.2/filters/normalize",
+                "search": "/api/v3.2/search",
             },
         }
     )
@@ -111,12 +160,16 @@ def capabilities():
 @v32_bp.get("/events")
 def events():
     try:
-        interval = int(request.args.get("interval", 15))
+        heartbeat = int(request.args.get("heartbeat", 15))
     except ValueError:
-        interval = 15
-    interval = min(max(interval, 5), 60)
+        heartbeat = 15
+    heartbeat = min(max(heartbeat, 5), 60)
+    topics = normalize_topics(request.args.get("topics"))
+    last_event_id = request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
     return Response(
-        stream_with_context(heartbeat_stream(interval_seconds=interval)),
+        stream_with_context(
+            broker_stream(topics, last_event_id=last_event_id, heartbeat_seconds=heartbeat)
+        ),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -126,9 +179,54 @@ def events():
     )
 
 
+@v32_bp.post("/events/publish")
+def publish_event():
+    if not _publish_authorized():
+        return jsonify({"error": "publishing is disabled or unauthorized"}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    data = payload.get("data", {})
+    if not isinstance(data, dict):
+        return jsonify({"error": "data must be a JSON object"}), 400
+    try:
+        item = BROKER.publish(payload.get("topic", ""), payload.get("event", ""), data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(item.as_dict()), 202
+
+
 @v32_bp.post("/preferences/normalize")
 def preferences():
     payload = request.get_json(silent=True)
     if payload is not None and not isinstance(payload, dict):
         return jsonify({"error": "request body must be a JSON object"}), 400
     return jsonify(normalize_dashboard_preferences(payload))
+
+
+@v32_bp.post("/filters/normalize")
+def saved_filter():
+    payload = request.get_json(silent=True)
+    if payload is not None and not isinstance(payload, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    return jsonify(normalize_saved_filter(payload))
+
+
+@v32_bp.post("/search")
+def search():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    entities = payload.get("entities", [])
+    if not isinstance(entities, list) or any(not isinstance(item, dict) for item in entities):
+        return jsonify({"error": "entities must be a list of JSON objects"}), 400
+    try:
+        results = search_entities(
+            payload.get("query", ""),
+            entities,
+            payload.get("entity_types"),
+            int(payload.get("limit", 20)),
+        )
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer"}), 400
+    return jsonify({"count": len(results), "results": results, "version": "3.2"})
