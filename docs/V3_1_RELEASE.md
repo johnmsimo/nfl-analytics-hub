@@ -24,6 +24,10 @@ All modules use the existing `/api/v3/analytics` namespace. Discover them with `
 - Unit coverage for live, player, team, betting, assistant, and watchlist modules
 - GitHub CI and quality/security workflows
 
+## Dashboard
+
+Open `/static/v31.html` to exercise every v3.1 module through the consolidated interface.
+
 ## Safety
 
 Betting outputs are analytical signals, not guarantees or financial advice. The assistant reports whether an answer is grounded in supplied context.
