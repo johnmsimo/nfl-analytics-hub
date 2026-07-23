@@ -97,9 +97,10 @@ def test_capabilities_expose_v431_without_changing_registry_contract():
     response = _client().get("/api/v4.3/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.3.1"
+    assert body["version"] == "4.3.2"
     assert body["registry_contract_version"] == "4.3.0"
     assert body["evaluation_contract_version"] == "4.3.1"
+    assert body["rollout_contract_version"] == "4.3.2"
     assert body["features"]["automated_evaluation"] is True
     assert body["features"]["champion_challenger_automation"] is True
 

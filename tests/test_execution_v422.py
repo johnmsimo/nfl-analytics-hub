@@ -28,7 +28,7 @@ def _job(job_type="simulation.run", payload=None, **overrides):
     return normalize_job(source, now=source["submitted_at"])
 
 
-def test_manifest_exposes_five_typed_families():
+def test_manifest_exposes_typed_families():
     manifest = execution_manifest()
     assert manifest["version"] == "4.2.2"
     assert manifest["job_contract_version"] == "4.2.0"
@@ -38,6 +38,7 @@ def test_manifest_exposes_five_typed_families():
         "scouting",
         "backfill",
         "report",
+        "model-lifecycle",
     }
 
 
@@ -68,7 +69,7 @@ def test_simulation_payload_is_typed_and_timeout_is_bounded():
     assert validated["payload"]["trials"] == 500
 
 
-def test_registry_validates_all_five_handler_payloads():
+def test_registry_validates_original_five_handler_payloads():
     registry = TypedHandlerRegistry()
     sources = [
         _job(
@@ -229,9 +230,7 @@ def test_worker_persists_handler_failure():
     def handler(_payload, _context):
         raise RuntimeError("service unavailable")
 
-    registry = TypedHandlerRegistry(
-        [HandlerSpec("simulation.run", "simulation", 30, validator, handler)]
-    )
+    registry = TypedHandlerRegistry([HandlerSpec("simulation.run", "simulation", 30, validator, handler)])
     transport = InMemoryStreamTransport()
     transport.enqueue(_job())
     store = InMemoryExecutionStore()

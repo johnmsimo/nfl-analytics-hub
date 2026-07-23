@@ -1,4 +1,5 @@
 """Typed distributed execution for NFL Analytics Hub v4.2 jobs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -85,7 +86,7 @@ def _mapping_list(
     *,
     maximum: int = 10_000,
 ) -> list[dict[str, Any]]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
         raise ValueError(f"{field} must be a list")
     if len(value) > maximum:
         raise ValueError(f"{field} cannot contain more than {maximum} items")
@@ -100,7 +101,7 @@ def _string_list(
     *,
     maximum: int = 25,
 ) -> list[str]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+    if isinstance(value, str | bytes) or not isinstance(value, Sequence):
         raise ValueError(f"{field} must be a list")
     if len(value) > maximum:
         raise ValueError(f"{field} cannot contain more than {maximum} items")
@@ -122,9 +123,7 @@ def _canonical_json(value: Any, field: str, maximum_bytes: int) -> str:
             sort_keys=True,
         )
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"{field} must be JSON-safe and contain only finite numbers"
-        ) from exc
+        raise ValueError(f"{field} must be JSON-safe and contain only finite numbers") from exc
     if len(raw.encode("utf-8")) > maximum_bytes:
         raise ValueError(f"{field} exceeds {maximum_bytes} bytes")
     return raw
@@ -146,14 +145,12 @@ def _model_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     if market not in allowed:
         raise ValueError("market is unsupported")
-    normalized = {
+    normalized: dict[str, Any] = {
         "rows": rows,
         "market": market,
         "position": _text(result.get("position", "WR"), "position", 10).upper(),
         "opponent": (
-            str(result.get("opponent")).strip().upper()[:10]
-            if result.get("opponent") is not None
-            else None
+            str(result.get("opponent")).strip().upper()[:10] if result.get("opponent") is not None else None
         ),
         "dvp": _mapping(result.get("dvp", {}), "dvp"),
     }
@@ -194,9 +191,7 @@ def _scouting_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
                 maximum=500,
             ),
             "metrics": (
-                _string_list(result["metrics"], "metrics")
-                if result.get("metrics") is not None
-                else None
+                _string_list(result["metrics"], "metrics") if result.get("metrics") is not None else None
             ),
             "limit": _integer(result.get("limit", 5), "limit", 1, 25),
         }
@@ -205,9 +200,7 @@ def _scouting_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
             "operation": operation,
             "teams": _mapping_list(result.get("teams"), "teams", maximum=100),
             "metrics": (
-                _string_list(result["metrics"], "metrics")
-                if result.get("metrics") is not None
-                else None
+                _string_list(result["metrics"], "metrics") if result.get("metrics") is not None else None
             ),
             "cluster_count": _integer(
                 result.get("cluster_count", 3),
@@ -260,9 +253,15 @@ def _report_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"report": _mapping(result.get("report"), "report")}
 
 
+def _retraining_request_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    from rollout_v432 import normalize_retraining_job_payload
+
+    return normalize_retraining_job_payload(payload)
+
+
 def _handle_model(
     payload: Mapping[str, Any],
-    context: "ExecutionContext",
+    context: ExecutionContext,
 ) -> dict[str, Any]:
     from projections import prob_over, project_stat
 
@@ -286,7 +285,7 @@ def _handle_model(
 
 def _handle_simulation(
     payload: Mapping[str, Any],
-    context: "ExecutionContext",
+    context: ExecutionContext,
 ) -> dict[str, Any]:
     probability = float(payload["home_win_probability"])
     trials = int(payload["trials"])
@@ -310,7 +309,7 @@ def _handle_simulation(
 
 def _handle_scouting(
     payload: Mapping[str, Any],
-    context: "ExecutionContext",
+    context: ExecutionContext,
 ) -> dict[str, Any]:
     from scouting_v41 import (
         cluster_team_styles,
@@ -344,7 +343,7 @@ def _handle_scouting(
 
 def _handle_backfill(
     payload: Mapping[str, Any],
-    context: "ExecutionContext",
+    context: ExecutionContext,
 ) -> dict[str, Any]:
     from historical_backfill import run
 
@@ -362,7 +361,7 @@ def _handle_backfill(
 
 def _handle_report(
     payload: Mapping[str, Any],
-    context: "ExecutionContext",
+    context: ExecutionContext,
 ) -> dict[str, Any]:
     from workspace_v413 import normalize_workspace_report
 
@@ -370,6 +369,26 @@ def _handle_report(
     result = normalize_workspace_report(payload["report"])
     context.checkpoint()
     return result
+
+
+def _handle_retraining_request(
+    payload: Mapping[str, Any],
+    context: ExecutionContext,
+) -> dict[str, Any]:
+    """Validate a retraining dispatch request without claiming that training ran."""
+    context.checkpoint()
+    return {
+        "request_validated": True,
+        "automatic_training": False,
+        "trigger_id": payload["trigger_id"],
+        "source_model_version_id": payload["source_model_version_id"],
+        "model_key": payload["model_key"],
+        "target": payload["target"],
+        "requested_version": payload["requested_version"],
+        "dataset_digest": payload["dataset_digest"],
+        "code_version": payload["code_version"],
+        "output_artifact_uri": payload["output_artifact_uri"],
+    }
 
 
 @dataclass(frozen=True)
@@ -399,6 +418,13 @@ _DEFAULT_SPECS = (
     ),
     HandlerSpec("backfill.run", "backfill", 3_600, _backfill_payload, _handle_backfill),
     HandlerSpec("report.generate", "report", 120, _report_payload, _handle_report),
+    HandlerSpec(
+        "model.retraining.request",
+        "model-lifecycle",
+        30,
+        _retraining_request_payload,
+        _handle_retraining_request,
+    ),
 )
 
 
@@ -454,7 +480,7 @@ class TypedHandlerRegistry:
     def execute(
         self,
         job: Mapping[str, Any],
-        context: "ExecutionContext",
+        context: ExecutionContext,
     ) -> Any:
         validated = self.validate(job)
         spec = self._specs[validated["job_type"]]
@@ -491,7 +517,7 @@ def normalize_cancellation_request(
     timestamp = _number(requested_at, "requested_at", 0, 99_999_999_999)
     normalized_reason = _text(reason, "reason", 500)
     identity = hashlib.sha256(
-        f"{normalized_job_id}:{timestamp:.6f}:{normalized_reason}".encode("utf-8")
+        f"{normalized_job_id}:{timestamp:.6f}:{normalized_reason}".encode()
     ).hexdigest()[:24]
     return {
         "version": VERSION,
