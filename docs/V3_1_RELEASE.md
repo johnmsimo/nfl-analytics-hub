@@ -28,6 +28,10 @@ All modules use the existing `/api/v3/analytics` namespace. Discover them with `
 
 Open `/static/v31.html` to exercise every v3.1 module through the consolidated interface.
 
+## Release inventory
+
+The v3.1 branch contains the engine, Flask endpoints, deterministic tests, dashboard, and release documentation required for the planned upgrade scope.
+
 ## Safety
 
 Betting outputs are analytical signals, not guarantees or financial advice. The assistant reports whether an answer is grounded in supplied context.
