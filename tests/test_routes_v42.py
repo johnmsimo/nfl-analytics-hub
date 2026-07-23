@@ -17,15 +17,17 @@ def _job():
     }
 
 
-def test_capabilities_expose_foundation_and_transport_boundary():
+def test_capabilities_expose_complete_distributed_platform():
     response = _client().get("/api/v4.2/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.2.2"
+    assert body["version"] == "4.2.3"
     assert body["job_contract_version"] == "4.2.0"
     assert body["features"]["idempotent_job_contracts"] is True
     assert body["features"]["redis_stream_transport"] is True
     assert body["features"]["typed_handlers"] is True
+    assert body["features"]["namespaced_distributed_cache"] is True
+    assert body["features"]["dead_letter_inspection"] is True
 
 
 def test_job_normalize_returns_stable_contract():

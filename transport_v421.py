@@ -1,4 +1,5 @@
 """Redis Streams transport and in-memory fallback for v4.2 jobs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -75,6 +76,56 @@ def _job_json(job: Mapping[str, Any]) -> str:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("job must be JSON-safe and contain only finite numbers") from exc
+
+
+def _latency_summary(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {"samples": 0, "average": None, "p95": None, "maximum": None}
+    ordered = sorted(values)
+    p95_index = max(0, min(len(ordered) - 1, (95 * len(ordered) + 99) // 100 - 1))
+    return {
+        "samples": len(ordered),
+        "average": round(sum(ordered) / len(ordered), 6),
+        "p95": round(ordered[p95_index], 6),
+        "maximum": round(ordered[-1], 6),
+    }
+
+
+def _dead_letter_record(
+    job: Mapping[str, Any],
+    message_id: str,
+    *,
+    recorded_at: float,
+) -> dict[str, Any]:
+    current = _job_copy(job)
+    if current["status"] != "failed":
+        raise ValueError("dead-letter records require a failed job")
+    timestamp = _timestamp(recorded_at, "recorded_at")
+    identity = ":".join(
+        (
+            str(current["job_id"]),
+            str(current["attempt"]),
+            str(current.get("completed_at")),
+            str(message_id),
+        )
+    )
+    return {
+        "version": "4.2.3",
+        "dead_letter_id": ("dead_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]),
+        "message_id": str(message_id),
+        "job_id": str(current["job_id"]),
+        "job_type": str(current.get("job_type", "")),
+        "namespace": str(current.get("namespace", "")),
+        "attempt": int(current["attempt"]),
+        "max_attempts": int(current["max_attempts"]),
+        "payload_digest": str(current.get("payload_digest", "")),
+        "submitted_at": current.get("submitted_at"),
+        "started_at": current.get("started_at"),
+        "failed_at": current.get("completed_at"),
+        "recorded_at": timestamp,
+        "worker_id": current.get("worker_id"),
+        "error": str(current.get("error", ""))[:2_000],
+    }
 
 
 def normalize_lease(
@@ -185,6 +236,9 @@ class InMemoryStreamTransport:
         self._messages: list[dict[str, str]] = []
         self._pending: dict[str, dict[str, Any]] = {}
         self._acknowledged: set[str] = set()
+        self._dead_letters: dict[str, dict[str, Any]] = {}
+        self._claim_latencies: list[float] = []
+        self._completion_latencies: list[float] = []
         self._sequence = 0
         self._lock = threading.RLock()
 
@@ -201,11 +255,7 @@ class InMemoryStreamTransport:
             if existing is not None:
                 if existing["payload_digest"] != candidate["payload_digest"]:
                     raise ValueError("job_id conflicts with an existing payload")
-                message_id = next(
-                    item["message_id"]
-                    for item in self._messages
-                    if item["job_id"] == job_id
-                )
+                message_id = next(item["message_id"] for item in self._messages if item["job_id"] == job_id)
                 return {
                     "accepted": False,
                     "deduplicated": True,
@@ -256,6 +306,8 @@ class InMemoryStreamTransport:
                 )
                 self._jobs[message["job_id"]] = job
                 self._pending[message_id] = lease
+                self._claim_latencies.append(max(0.0, claimed_at - float(job["submitted_at"])))
+                self._claim_latencies = self._claim_latencies[-1_000:]
                 claimed.append(
                     {
                         "message_id": message_id,
@@ -287,6 +339,16 @@ class InMemoryStreamTransport:
             if lease["job_id"] != completed["job_id"]:
                 raise ValueError("job_id does not match the lease")
             self._jobs[str(completed["job_id"])] = completed
+            completed_at = float(completed.get("completed_at") or time.time())
+            self._completion_latencies.append(max(0.0, completed_at - float(completed["submitted_at"])))
+            self._completion_latencies = self._completion_latencies[-1_000:]
+            if completed["status"] == "failed":
+                record = _dead_letter_record(
+                    completed,
+                    message,
+                    recorded_at=completed_at,
+                )
+                self._dead_letters[record["dead_letter_id"]] = record
             self._pending.pop(message, None)
             self._acknowledged.add(message)
             return {
@@ -324,10 +386,61 @@ class InMemoryStreamTransport:
                 if outcome["action"] == "reclaimed":
                     self._pending[message_id] = outcome["lease"]
                 else:
+                    record = _dead_letter_record(
+                        outcome["job"],
+                        message_id,
+                        recorded_at=recovered_at,
+                    )
+                    self._dead_letters[record["dead_letter_id"]] = record
                     self._pending.pop(message_id, None)
                     self._acknowledged.add(message_id)
                 recovered.append({"message_id": message_id, **deepcopy(outcome)})
         return recovered
+
+    def operations_snapshot(self, *, now: float | None = None) -> dict[str, Any]:
+        measured_at = _timestamp(time.time() if now is None else now, "now")
+        with self._lock:
+            queued_jobs = [
+                self._jobs[message["job_id"]]
+                for message in self._messages
+                if message["message_id"] not in self._pending
+                and message["message_id"] not in self._acknowledged
+            ]
+            oldest_age = (
+                max(0.0, measured_at - min(float(job["submitted_at"]) for job in queued_jobs))
+                if queued_jobs
+                else 0.0
+            )
+            return {
+                "version": "4.2.3",
+                "backend": self.backend,
+                "measured_at": measured_at,
+                "queue_depth": len(queued_jobs),
+                "pending_depth": len(self._pending),
+                "acknowledged_total": len(self._acknowledged),
+                "dead_letter_depth": len(self._dead_letters),
+                "oldest_queued_age_seconds": round(oldest_age, 6),
+                "claim_latency_seconds": _latency_summary(self._claim_latencies),
+                "completion_latency_seconds": _latency_summary(self._completion_latencies),
+            }
+
+    def list_dead_letters(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        bounded = _integer(limit, "limit", 1, 100)
+        with self._lock:
+            records = sorted(
+                self._dead_letters.values(),
+                key=lambda item: (float(item["recorded_at"]), item["dead_letter_id"]),
+                reverse=True,
+            )
+            return deepcopy(records[:bounded])
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "component": "job_transport",
+            "backend": self.backend,
+            "healthy": True,
+            "durable": False,
+        }
 
 
 class RedisStreamTransport:
@@ -367,6 +480,10 @@ return {1, message_id}
         self.digests_key = f"{self.key_prefix}:job-digests"
         self.messages_key = f"{self.key_prefix}:job-messages"
         self.leases_key = f"{self.key_prefix}:leases"
+        self.dead_letters_key = f"{self.key_prefix}:dead-letters"
+        self.claim_latencies_key = f"{self.key_prefix}:metrics:claim-latency"
+        self.completion_latencies_key = f"{self.key_prefix}:metrics:completion-latency"
+        self.operations_metrics_key = f"{self.key_prefix}:metrics:operations"
         self.lease_seconds = _integer(
             lease_seconds,
             "lease_seconds",
@@ -471,6 +588,11 @@ return {1, message_id}
                         message_id,
                         json.dumps(lease, separators=(",", ":"), sort_keys=True),
                     )
+                    pipe.lpush(
+                        self.claim_latencies_key,
+                        max(0.0, claimed_at - float(job["submitted_at"])),
+                    )
+                    pipe.ltrim(self.claim_latencies_key, 0, 999)
                     pipe.execute()
                 claimed.append({"message_id": message_id, "job": job, "lease": lease})
         return claimed
@@ -494,9 +616,27 @@ return {1, message_id}
             raise ValueError("worker does not own the lease")
         if lease["job_id"] != completed["job_id"]:
             raise ValueError("job_id does not match the lease")
+        completed_at = float(completed.get("completed_at") or time.time())
         with self.client.pipeline(transaction=True) as pipe:
             pipe.hset(self.jobs_key, completed["job_id"], _job_json(completed))
             pipe.hdel(self.leases_key, message)
+            pipe.lpush(
+                self.completion_latencies_key,
+                max(0.0, completed_at - float(completed["submitted_at"])),
+            )
+            pipe.ltrim(self.completion_latencies_key, 0, 999)
+            if completed["status"] == "failed":
+                record = _dead_letter_record(
+                    completed,
+                    message,
+                    recorded_at=completed_at,
+                )
+                pipe.hset(
+                    self.dead_letters_key,
+                    record["dead_letter_id"],
+                    json.dumps(record, separators=(",", ":"), sort_keys=True),
+                )
+            pipe.hincrby(self.operations_metrics_key, "acknowledged", 1)
             pipe.xack(self.stream_key, self.group, message)
             results = pipe.execute()
         return {
@@ -590,11 +730,93 @@ return {1, message_id}
                         json.dumps(outcome["lease"], separators=(",", ":"), sort_keys=True),
                     )
                 else:
+                    record = _dead_letter_record(
+                        outcome["job"],
+                        message_id,
+                        recorded_at=recovered_at,
+                    )
+                    pipe.hset(
+                        self.dead_letters_key,
+                        record["dead_letter_id"],
+                        json.dumps(record, separators=(",", ":"), sort_keys=True),
+                    )
                     pipe.hdel(self.leases_key, message_id)
+                    pipe.hincrby(self.operations_metrics_key, "acknowledged", 1)
                     pipe.xack(self.stream_key, self.group, message_id)
                 pipe.execute()
             recovered.append({"message_id": message_id, **outcome})
         return recovered
+
+    def operations_snapshot(self, *, now: float | None = None) -> dict[str, Any]:
+        measured_at = _timestamp(time.time() if now is None else now, "now")
+        self.ensure_group()
+        group_info = {}
+        for candidate in self.client.xinfo_groups(self.stream_key):
+            normalized = {self._text(key): value for key, value in candidate.items()}
+            if self._text(normalized.get("name", "")) == self.group:
+                group_info = normalized
+                break
+        pending_summary = self.client.xpending(self.stream_key, self.group)
+        if isinstance(pending_summary, Mapping):
+            pending = int(pending_summary.get("pending") or pending_summary.get(b"pending") or 0)
+        else:
+            pending = int(pending_summary[0]) if pending_summary else 0
+        total = int(self.client.xlen(self.stream_key))
+        acknowledged = int(self.client.hget(self.operations_metrics_key, "acknowledged") or 0)
+        entries_read = group_info.get("entries-read")
+        if entries_read is not None:
+            acknowledged = max(acknowledged, int(entries_read) - pending)
+        queue_depth = max(0, total - acknowledged - pending)
+        claim_values = [
+            float(self._text(value)) for value in self.client.lrange(self.claim_latencies_key, 0, 999)
+        ]
+        completion_values = [
+            float(self._text(value))
+            for value in self.client.lrange(
+                self.completion_latencies_key,
+                0,
+                999,
+            )
+        ]
+        return {
+            "version": "4.2.3",
+            "backend": self.backend,
+            "measured_at": measured_at,
+            "queue_depth": queue_depth,
+            "pending_depth": pending,
+            "acknowledged_total": acknowledged,
+            "dead_letter_depth": int(self.client.hlen(self.dead_letters_key)),
+            "oldest_queued_age_seconds": None,
+            "claim_latency_seconds": _latency_summary(claim_values),
+            "completion_latency_seconds": _latency_summary(completion_values),
+        }
+
+    def list_dead_letters(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        bounded = _integer(limit, "limit", 1, 100)
+        records: list[dict[str, Any]] = []
+        cursor: int | str = 0
+        while True:
+            cursor, batch = self.client.hscan(
+                self.dead_letters_key,
+                cursor=cursor,
+                count=bounded,
+            )
+            records.extend(json.loads(self._text(raw_record)) for raw_record in batch.values())
+            if len(records) >= bounded or int(cursor) == 0:
+                break
+        records.sort(
+            key=lambda item: (float(item["recorded_at"]), item["dead_letter_id"]),
+            reverse=True,
+        )
+        return records[:bounded]
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "component": "job_transport",
+            "backend": self.backend,
+            "healthy": bool(self.client.ping()),
+            "durable": True,
+        }
 
 
 def build_transport(
@@ -616,11 +838,7 @@ def build_transport(
         return RedisStreamTransport(redis_client, **kwargs)
     if not allow_memory_fallback:
         raise RuntimeError("REDIS_URL is required when memory fallback is disabled")
-    memory_kwargs = {
-        key: value
-        for key, value in kwargs.items()
-        if key == "lease_seconds"
-    }
+    memory_kwargs = {key: value for key, value in kwargs.items() if key == "lease_seconds"}
     return InMemoryStreamTransport(**memory_kwargs)
 
 

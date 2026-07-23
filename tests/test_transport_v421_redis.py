@@ -27,6 +27,10 @@ def transport():
         current.digests_key,
         current.messages_key,
         current.leases_key,
+        current.dead_letters_key,
+        current.claim_latencies_key,
+        current.completion_latencies_key,
+        current.operations_metrics_key,
     )
 
 
