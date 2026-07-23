@@ -1,43 +1,71 @@
 # NFL Analytics Hub v3.2
 
-v3.2 focuses on real-time delivery, personalization, model calibration, mobile usability, and production observability.
+v3.2 delivers real-time data transport, authenticated personalization, advanced discovery, model operations, a mobile workspace, observability, and grounded reports.
 
-## Delivery phases
+## Integrated release scope
 
-1. **Real-time foundation** — SSE event transport, typed event envelopes, reconnect behavior, and live-game subscriptions.
-2. **Personalization** — saved dashboard layouts, module ordering, density, refresh cadence, watchlist-driven views, and user preferences.
-3. **Advanced discovery** — cross-entity search, filters, saved queries, and shareable views.
-4. **Model operations** — calibration reports, version metadata, backtesting, drift checks, and confidence diagnostics.
-5. **Mobile experience** — compact navigation, touch-first controls, responsive tables, and reduced-data live mode.
-6. **Observability** — endpoint latency, stream health, provider freshness, model quality, and user-facing degradation states.
-7. **Generated reports** — grounded previews, recaps, weekly reports, and export workflows.
+### Real-time delivery
 
-## Completed increments
+- Server-Sent Events with typed envelopes and heartbeat behavior
+- Bounded provider-neutral event broker
+- Replayable IDs and `Last-Event-ID` reconnect support
+- Topic subscriptions for scores, odds, injuries, model updates, and system events
+- Guarded `POST /api/v3.2/events/publish` integration endpoint
 
-### Foundation
+### Personalization and discovery
+
+- Validated dashboard preferences and module ordering
+- Authenticated profile persistence for layouts, preferences, watchlists, and saved filters
+- Atomic file-backed storage configurable through `V32_PROFILE_STORE`
+- Cross-entity search for games, teams, players, and props
+- Stable saved-filter contracts
+
+### Model operations
+
+- Calibration buckets, Brier score, log loss, and accuracy
+- Backtesting with calibration and optional betting ROI
+- Standardized drift diagnostics and severity classification
+- Deterministic, dependency-light analytics contracts
+
+### Mobile experience
+
+- Touch-first responsive v3.2 workspace at `/static/v32.html`
+- Live event stream, provider health, model status, saved workspace controls, and report studio
+- Compact mobile layouts and reduced visual density
+
+### Observability
+
+- Endpoint request, success, and error counters
+- Average and p95 latency snapshots
+- Provider freshness tracking and user-facing degradation data
+- `GET /api/v3.2/observability`
+
+### Generated reports
+
+- Grounded game previews, recaps, and weekly reports
+- Explicit source-field metadata and grounded status
+- `POST /api/v3.2/reports/generate`
+
+## Key endpoints
 
 - `GET /api/v3.2/capabilities`
-- `GET /api/v3.2/events` using Server-Sent Events
-- `POST /api/v3.2/preferences/normalize`
-- Deterministic tests for event framing, heartbeat behavior, and preference validation
+- `GET /api/v3.2/events`
+- `POST /api/v3.2/events/publish`
+- `POST /api/v3.2/search`
+- `GET|PUT /api/v3.2/profile`
+- `POST /api/v3.2/models/calibration`
+- `POST /api/v3.2/models/backtest`
+- `POST /api/v3.2/models/drift`
+- `POST /api/v3.2/providers/freshness`
+- `GET /api/v3.2/observability`
+- `POST /api/v3.2/reports/generate`
 
-### Live pipeline and discovery
+## Deployment configuration
 
-- Bounded in-process event broker with replayable event IDs
-- Topic subscriptions for scores, odds, injuries, model updates, and system events
-- `Last-Event-ID` reconnection support
-- Guarded `POST /api/v3.2/events/publish` provider integration endpoint
-- `POST /api/v3.2/search` cross-entity search contract
-- `POST /api/v3.2/filters/normalize` saved-filter contract
-- Deterministic tests for broker replay, topic filtering, saved filters, and search ranking
+- Set `V32_PUBLISH_TOKEN` before connecting external publishers.
+- Set `V32_PROFILE_STORE` to a persistent mounted path in production. It defaults to `DATA_DIR/v32_profiles.json`.
+- For horizontally scaled deployments, replace the in-process event broker with Redis pub/sub while preserving the SSE contract.
 
-The in-process broker is intentionally provider-neutral. A Redis pub/sub adapter can replace it for multi-instance deployment without changing the public SSE contract.
+## Validation
 
-## Remaining work
-
-- Persist layouts, filters, and preferences per authenticated user
-- Connect score, odds, injury, and model providers to the guarded publish endpoint
-- Add model calibration, backtesting, version registry, and drift diagnostics
-- Build the mobile-first customizable dashboard
-- Add stream, provider, endpoint, and model-quality observability
-- Add generated previews, recaps, weekly reports, and export workflows
+Deterministic unit coverage includes preferences, SSE framing, broker replay, subscriptions, discovery, profile persistence, calibration, backtesting, drift diagnostics, observability, and report generation.
