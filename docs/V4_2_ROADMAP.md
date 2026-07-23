@@ -74,10 +74,34 @@ provider-neutral while Redis and external workers are introduced incrementally.
   process-local memory
 - No caller-selected module, function, command, or executable can be dispatched
 
+## v4.2.3 endpoints
+
+- `GET /api/v4.2/operations/capabilities`
+- `POST /api/v4.2/cache/keys/normalize`
+- `POST /api/v4.2/cache/invalidations/normalize`
+- `GET /api/v4.2/operations/snapshot`
+- `GET /api/v4.2/operations/dead-letters`
+
+## v4.2.3 Cache and operations
+
+- Deterministic, versioned cache addresses with bounded namespaces, logical keys, values,
+  tags, and TTLs
+- Redis-backed distributed cache plus a thread-safe in-memory development backend
+- Namespace, logical-key, and tag invalidation without production key-space scans
+- Bounded provider-neutral invalidation events with recent-event inspection
+- Queue, pending, acknowledged, and dead-letter depth snapshots
+- Bounded claim and completion latency samples with average, p95, and maximum summaries
+- Payload-safe dead-letter records that retain job identity, digest, attempts, worker, error,
+  and timing metadata without copying the original payload or result
+- Redis, transport, and result-store health reporting with visible configured-backend failures
+- Horizontal scaling guidance for stateless web replicas, queue-driven workers, singleton
+  schedulers, Redis coordination, and graceful worker shutdown
+
 ## Guardrails
 
 - Existing v3.x, v4.0, and v4.1 contracts remain unchanged.
-- v4.2.0 defines contracts, v4.2.1 adds transport, and v4.2.2 adds typed execution.
+- v4.2.0 defines contracts, v4.2.1 adds transport, v4.2.2 adds typed execution, and v4.2.3
+  adds cache and operational controls.
 - Arbitrary functions, modules, shell commands, and caller-supplied code are never executed.
 - Job and event identities are deterministic, while timestamps remain explicit.
 - A reused caller idempotency key with a different payload is a visible conflict.
@@ -93,8 +117,13 @@ provider-neutral while Redis and external workers are introduced incrementally.
 - Handler exceptions, cancellations, and timeouts produce bounded terminal job records.
 - Cooperative cancellation is checked before, during, and after built-in work; the Linux
   worker runtime additionally interrupts handlers at their deadline.
+- Cache storage keys contain hashes instead of raw logical keys.
+- Distributed invalidation uses bounded indexes and events instead of Redis `KEYS`.
+- Dead-letter inspection excludes business payloads and results.
+- Multi-replica deployments require Redis; process-local memory remains a development fallback.
 
-## Next increment
+## Series status
 
-v4.2.3 will add namespaced distributed caching, invalidation events, queue depth and latency
-metrics, dead-letter inspection, health checks, and horizontal-scaling guidance.
+v4.2.3 completes the planned Distributed Intelligence Platform series. A future v4.3 roadmap
+should be defined from production evidence rather than extending the v4.2 public contracts
+implicitly.

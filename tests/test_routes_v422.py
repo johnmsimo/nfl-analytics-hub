@@ -73,7 +73,7 @@ def test_cancellation_endpoint_returns_stable_envelope():
 
 def test_combined_capabilities_advertise_execution_endpoints():
     body = _client().get("/api/v4.2/capabilities").get_json()
-    assert body["version"] == "4.2.2"
+    assert body["version"] == "4.2.3"
     assert body["endpoints"]["execution_capabilities"].endswith(
         "/execution/capabilities"
     )

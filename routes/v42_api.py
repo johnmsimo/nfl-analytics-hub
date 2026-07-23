@@ -1,4 +1,5 @@
 """NFL Analytics Hub v4.2 distributed intelligence endpoints."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -8,10 +9,18 @@ from flask import Blueprint, jsonify, request
 from distributed_v42 import job_event, normalize_job, platform_manifest, transition_job
 from execution_v422 import (
     TypedHandlerRegistry,
+    build_execution_store,
     execution_manifest,
     normalize_cancellation_request,
 )
-from transport_v421 import normalize_lease, transport_manifest
+from operations_v423 import (
+    build_distributed_cache,
+    component_health,
+    normalize_cache_key,
+    normalize_invalidation_event,
+    operations_manifest,
+)
+from transport_v421 import build_transport, normalize_lease, transport_manifest
 
 v42_bp = Blueprint("v42_api", __name__, url_prefix="/api/v4.2")
 
@@ -26,15 +35,17 @@ def capabilities():
     foundation = platform_manifest()
     transport = transport_manifest()
     execution = execution_manifest()
+    operations = operations_manifest()
     return jsonify(
         {
             **foundation,
-            "version": execution["version"],
-            "job_contract_version": execution["job_contract_version"],
+            "version": operations["version"],
+            "job_contract_version": operations["job_contract_version"],
             "features": {
                 **foundation["features"],
                 **transport["features"],
                 **execution["features"],
+                **operations["features"],
             },
             "transport": {
                 "backends": transport["backends"],
@@ -45,7 +56,12 @@ def capabilities():
                 "result_backends": execution["result_backends"],
                 "limits": execution["limits"],
             },
-            "next_increment": execution["next_increment"],
+            "operations": {
+                "cache_backends": operations["cache_backends"],
+                "limits": operations["limits"],
+                "scaling": operations["scaling"],
+            },
+            "next_increment": operations["next_increment"],
             "endpoints": {
                 "capabilities": "/api/v4.2/capabilities",
                 "job_normalize": "/api/v4.2/jobs/normalize",
@@ -55,9 +71,12 @@ def capabilities():
                 "lease_normalize": "/api/v4.2/transport/leases/normalize",
                 "execution_capabilities": "/api/v4.2/execution/capabilities",
                 "execution_validate": "/api/v4.2/execution/jobs/validate",
-                "cancellation_normalize": (
-                    "/api/v4.2/execution/cancellations/normalize"
-                ),
+                "cancellation_normalize": ("/api/v4.2/execution/cancellations/normalize"),
+                "operations_capabilities": "/api/v4.2/operations/capabilities",
+                "cache_key_normalize": "/api/v4.2/cache/keys/normalize",
+                "cache_invalidation_normalize": ("/api/v4.2/cache/invalidations/normalize"),
+                "operations_snapshot": "/api/v4.2/operations/snapshot",
+                "dead_letters": "/api/v4.2/operations/dead-letters",
             },
         }
     )
@@ -117,6 +136,86 @@ def normalize_execution_cancellation():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(result)
+
+
+@v42_bp.get("/operations/capabilities")
+def operations_capabilities():
+    return jsonify(operations_manifest())
+
+
+@v42_bp.post("/cache/keys/normalize")
+def normalize_distributed_cache_key():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "cache key must be a JSON object"}), 400
+    try:
+        result = normalize_cache_key(
+            payload.get("namespace"),
+            payload.get("key"),
+            cache_version=payload.get("cache_version", 1),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v42_bp.post("/cache/invalidations/normalize")
+def normalize_distributed_cache_invalidation():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "invalidation must be a JSON object"}), 400
+    try:
+        result = normalize_invalidation_event(
+            payload,
+            occurred_at=payload.get("occurred_at"),
+            sequence=payload.get("sequence", 1),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v42_bp.get("/operations/snapshot")
+def operations_snapshot():
+    try:
+        cache = build_distributed_cache()
+        transport = build_transport()
+        store = build_execution_store()
+        components = [
+            component_health(cache, "distributed_cache"),
+            component_health(transport, "job_transport"),
+            component_health(store, "execution_store"),
+        ]
+        queue = transport.operations_snapshot()
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"version": "4.2.3", "healthy": False, "error": str(exc)}), 503
+    return jsonify(
+        {
+            "version": "4.2.3",
+            "healthy": all(item["healthy"] for item in components),
+            "components": components,
+            "queue": queue,
+        }
+    )
+
+
+@v42_bp.get("/operations/dead-letters")
+def dead_letters():
+    try:
+        limit = int(request.args.get("limit", 50))
+        transport = build_transport()
+        records = transport.list_dead_letters(limit=limit)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"version": "4.2.3", "error": str(exc)}), 503
+    return jsonify(
+        {
+            "version": "4.2.3",
+            "count": len(records),
+            "dead_letters": records,
+        }
+    )
 
 
 @v42_bp.post("/jobs/normalize")
