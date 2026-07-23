@@ -9,11 +9,11 @@ def _client():
     return app.test_client()
 
 
-def test_v412_capabilities_expose_history_endpoints():
+def test_v413_capabilities_preserve_history_endpoints():
     response = _client().get("/api/v4.1/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.1.2"
+    assert body["version"] == "4.1.3"
     assert body["features"]["scouting_history"] is True
     assert body["endpoints"]["history_seasons"].endswith("/history/seasons")
 
