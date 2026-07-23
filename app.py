@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import json
 import os
 import threading
 import time
@@ -27,17 +26,16 @@ def _load_local_env_file() -> None:
                 k, _, v = line.partition("=")
                 os.environ.setdefault(k.strip(), v.strip().strip("'\""))
     except FileNotFoundError:
-        pass
+        return
 
 
 _load_local_env_file()
 
 from flask import Flask, Response, jsonify, request  # noqa: E402
 
-from security import configure_security  # noqa: E402
-from database import configure_database, init_database  # noqa: E402
-
 import nfl_data  # noqa: E402
+from database import configure_database, init_database  # noqa: E402
+from security import configure_security  # noqa: E402
 
 app = Flask(__name__)
 app.json.sort_keys = False
@@ -178,6 +176,7 @@ def ready():
     """Readiness probe: database can answer a trivial query."""
     try:
         from sqlalchemy import text
+
         from database import db
 
         db.session.execute(text("SELECT 1"))
@@ -189,8 +188,8 @@ def ready():
 
 @app.route("/metrics")
 def metrics():
-    from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
     from prometheus_client import CollectorRegistry
+    from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
     registry = CollectorRegistry()
     uptime = Gauge("nfl_hub_process_uptime_seconds", "Process uptime", registry=registry)
@@ -228,20 +227,20 @@ def _safe(fn, *a):
         return {"error": str(e)}
 
 
+from routes.admin_api import admin_bp  # noqa: E402
+from routes.analytics_api import analytics_api_bp  # noqa: E402
+from routes.ask import ask_bp  # noqa: E402
+from routes.auth import auth_bp  # noqa: E402
+from routes.dashboard_api import dashboard_bp  # noqa: E402
+from routes.database_api import database_bp  # noqa: E402
+from routes.directories import directories_bp  # noqa: E402
+from routes.feeds import feeds_bp  # noqa: E402
 from routes.games import games_bp  # noqa: E402
+from routes.intelligence import intelligence_bp  # noqa: E402
+from routes.players import players_bp  # noqa: E402
 from routes.props import props_bp  # noqa: E402
 from routes.tracker_routes import tracker_bp  # noqa: E402
-from routes.players import players_bp  # noqa: E402
-from routes.dashboard_api import dashboard_bp  # noqa: E402
-from routes.directories import directories_bp  # noqa: E402
-from routes.intelligence import intelligence_bp  # noqa: E402
-from routes.auth import auth_bp  # noqa: E402
-from routes.database_api import database_bp  # noqa: E402
-from routes.admin_api import admin_bp  # noqa: E402
 from routes.v2_api import v2_bp  # noqa: E402
-from routes.ask import ask_bp  # noqa: E402
-from routes.feeds import feeds_bp  # noqa: E402
-from routes.analytics_api import analytics_api_bp  # noqa: E402
 from routes.v32_api import v32_bp  # noqa: E402
 from routes.v32_release_api import v32_release_bp  # noqa: E402
 
