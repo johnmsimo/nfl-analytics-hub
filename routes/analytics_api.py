@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from analytics_engine import (
     drive_success_summary,
     epa_summary,
+    game_intelligence,
     injury_impact,
     live_win_probability,
     matchup_intelligence,
@@ -87,3 +88,27 @@ def similarity():
 def matchup():
     data = _payload()
     return jsonify(matchup_intelligence(data.get("home", {}), data.get("away", {})))
+
+
+@analytics_api_bp.post("/game-intelligence")
+def intelligence():
+    data = _payload()
+    home = data.get("home") or {}
+    away = data.get("away") or {}
+    if not isinstance(home, dict) or not isinstance(away, dict):
+        return jsonify({"error": "home and away must be JSON objects"}), 400
+
+    try:
+        result = game_intelligence(
+            home,
+            away,
+            home_injuries=data.get("home_injuries") or [],
+            away_injuries=data.get("away_injuries") or [],
+            weather=data.get("weather") or {},
+            market=data.get("market") or {},
+            simulations=int(data.get("simulations", 10_000)),
+            seed=int(data.get("seed", 31)),
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
