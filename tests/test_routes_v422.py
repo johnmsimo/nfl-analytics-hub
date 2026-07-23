@@ -10,18 +10,22 @@ def _client():
 
 
 def _job():
-    return _client().post(
-        "/api/v4.2/jobs/normalize",
-        json={
-            "job_type": "simulation.run",
-            "payload": {
-                "home_win_probability": 0.55,
-                "trials": 1_000,
-                "seed": 7,
+    return (
+        _client()
+        .post(
+            "/api/v4.2/jobs/normalize",
+            json={
+                "job_type": "simulation.run",
+                "payload": {
+                    "home_win_probability": 0.55,
+                    "trials": 1_000,
+                    "seed": 7,
+                },
+                "submitted_at": 100.0,
             },
-            "submitted_at": 100.0,
-        },
-    ).get_json()
+        )
+        .get_json()
+    )
 
 
 def test_execution_capabilities_expose_handlers_and_limits():
@@ -29,7 +33,7 @@ def test_execution_capabilities_expose_handlers_and_limits():
     body = response.get_json()
     assert response.status_code == 200
     assert body["version"] == "4.2.2"
-    assert len(body["handlers"]) == 5
+    assert len(body["handlers"]) == 6
     assert body["features"]["idempotent_result_persistence"] is True
 
 
@@ -74,9 +78,5 @@ def test_cancellation_endpoint_returns_stable_envelope():
 def test_combined_capabilities_advertise_execution_endpoints():
     body = _client().get("/api/v4.2/capabilities").get_json()
     assert body["version"] == "4.2.3"
-    assert body["endpoints"]["execution_capabilities"].endswith(
-        "/execution/capabilities"
-    )
-    assert body["endpoints"]["execution_validate"].endswith(
-        "/execution/jobs/validate"
-    )
+    assert body["endpoints"]["execution_capabilities"].endswith("/execution/capabilities")
+    assert body["endpoints"]["execution_validate"].endswith("/execution/jobs/validate")

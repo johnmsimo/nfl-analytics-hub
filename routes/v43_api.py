@@ -18,6 +18,13 @@ from lifecycle_v43 import (
     normalize_promotion_policy,
     transition_model_version,
 )
+from rollout_v432 import (
+    build_retraining_request,
+    evaluate_retraining_triggers,
+    evaluate_rollout_step,
+    normalize_rollout_plan,
+    rollout_manifest,
+)
 
 v43_bp = Blueprint("v43_api", __name__, url_prefix="/api/v4.3")
 
@@ -31,17 +38,20 @@ def _json_object() -> dict[str, Any] | None:
 def capabilities():
     registry = lifecycle_manifest()
     evaluation = evaluation_manifest()
+    rollout = rollout_manifest()
     return jsonify(
         {
-            **evaluation,
+            **rollout,
             "features": {
                 **registry["features"],
                 **evaluation["features"],
+                **rollout["features"],
                 "automated_evaluation": True,
                 "champion_challenger_automation": True,
             },
             "registry_contract_version": registry["version"],
             "evaluation_contract_version": evaluation["version"],
+            "rollout_contract_version": rollout["version"],
             "endpoints": {
                 "capabilities": "/api/v4.3/capabilities",
                 "model_version_normalize": "/api/v4.3/models/versions/normalize",
@@ -50,6 +60,10 @@ def capabilities():
                 "evaluation_metrics": "/api/v4.3/models/evaluations/metrics",
                 "evaluation_run": "/api/v4.3/models/evaluations/run",
                 "champion_challenger_select": ("/api/v4.3/models/champion-challenger/select"),
+                "retraining_trigger_evaluate": ("/api/v4.3/models/retraining/triggers/evaluate"),
+                "retraining_request_normalize": ("/api/v4.3/models/retraining/requests/normalize"),
+                "rollout_plan_normalize": "/api/v4.3/models/rollouts/plans/normalize",
+                "rollout_step_evaluate": "/api/v4.3/models/rollouts/steps/evaluate",
             },
         }
     )
@@ -130,6 +144,66 @@ def select_model_champion():
         result = select_champion_challenger(
             payload,
             decided_at=payload.get("decided_at"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v43_bp.post("/models/retraining/triggers/evaluate")
+def evaluate_model_retraining_trigger():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "trigger evaluation must be a JSON object"}), 400
+    try:
+        result = evaluate_retraining_triggers(
+            payload,
+            evaluated_at=payload.get("evaluated_at"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v43_bp.post("/models/retraining/requests/normalize")
+def normalize_model_retraining_request():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "retraining request must be a JSON object"}), 400
+    try:
+        result = build_retraining_request(
+            payload,
+            requested_at=payload.get("requested_at"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v43_bp.post("/models/rollouts/plans/normalize")
+def normalize_model_rollout_plan():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "rollout plan must be a JSON object"}), 400
+    try:
+        result = normalize_rollout_plan(
+            payload,
+            planned_at=payload.get("planned_at"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result)
+
+
+@v43_bp.post("/models/rollouts/steps/evaluate")
+def evaluate_model_rollout_step():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "rollout step evaluation must be a JSON object"}), 400
+    try:
+        result = evaluate_rollout_step(
+            payload,
+            evaluated_at=payload.get("evaluated_at"),
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

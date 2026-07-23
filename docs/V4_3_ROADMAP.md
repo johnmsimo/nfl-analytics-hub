@@ -31,6 +31,13 @@ rules established by earlier releases.
 - `POST /api/v4.3/models/evaluations/run`
 - `POST /api/v4.3/models/champion-challenger/select`
 
+## v4.3.2 endpoints
+
+- `POST /api/v4.3/models/retraining/triggers/evaluate`
+- `POST /api/v4.3/models/retraining/requests/normalize`
+- `POST /api/v4.3/models/rollouts/plans/normalize`
+- `POST /api/v4.3/models/rollouts/steps/evaluate`
+
 ## v4.3.0 Registry foundation
 
 - Deterministic model and model-version identities derived from caller-supplied keys
@@ -64,6 +71,17 @@ rules established by earlier releases.
 - Promotion-decision envelopes that are accepted directly by the v4.3.0 candidate-to-champion
   transition contract
 
+## v4.3.2 Retraining and rollout controls
+
+- Evidence-backed drift, performance-degradation, prediction-drift, and data-freshness triggers
+- Bounded sample, freshness, all/any signal, and retraining cooldown enforcement
+- Idempotent `model.retraining.request` jobs using the stable v4.2.0 distributed envelope
+- One allowlisted distributed handler that validates requests without claiming training completed
+- Evidence-bound shadow and canary rollout plans over passing v4.3.1 selections
+- Strictly increasing traffic steps, bounded observation windows, and caller-supplied health gates
+- Advance, hold, complete, and rollback decisions without automatic traffic mutation
+- Explicit rollback targets pinned to the prior champion artifact and feature schema
+
 ## Guardrails
 
 - Existing v3.x, v4.0, v4.1, and v4.2 contracts remain unchanged.
@@ -84,10 +102,16 @@ rules established by earlier releases.
 - Evaluation never mutates lifecycle state or silently promotes a model.
 - Unsupported policy metrics, altered evidence records, stale evaluations, schema mismatches,
   and missing verification evidence fail visibly.
-- Retraining, canary rollout, rollback, durable registry storage, and operator approvals remain
-  later increments.
+- Retraining decisions and rollout plans never start training, mutate lifecycle state, or change
+  serving traffic automatically.
+- A completed distributed retraining-request job means the request contract was validated; it
+  does not claim that an external trainer produced an artifact.
+- Shadow and canary advancement requires caller-supplied, fresh, sample-qualified health evidence.
+- Rollback decisions always name the prior champion model version, artifact, and feature schema.
+- Durable registry storage, external trainer execution, deployment adapters, and operator
+  approvals remain v4.3.3 concerns.
 
 ## Next increment
 
-v4.3.2 should add drift and performance retraining triggers, distributed retraining requests,
-shadow/canary rollout plans, and explicit rollback targets.
+v4.3.3 should add persistent registry adapters, audit history, lifecycle health and alerts,
+operator approvals, and a model operations workspace.
