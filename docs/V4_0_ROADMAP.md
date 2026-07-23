@@ -6,7 +6,7 @@ v4.0 evolves the deployed analytics platform into a decision-support system that
 
 1. **Decision foundation** — reliability-weighted ensembles, automatic primary-model selection, model disagreement, confidence, scenario adjustments, and grounded decision briefs.
 2. **Simulation laboratory** — distribution-based game simulations, injury/weather/lineup overrides, sensitivity analysis, and reusable scenario presets.
-3. **AI insight layer** — structured driver analysis, prediction-change explanations, upset alerts, confidence reasoning, and evidence-linked recommendations.
+3. **AI insight layer** — structured driver analysis, prediction-change explanations, upset alerts, confidence reasoning, evidence-linked recommendations, and decision history.
 4. **Advanced scouting** — player similarity, team-style clustering, personnel and formation tendencies, matchup strengths, and exploitable weaknesses.
 5. **Distributed intelligence platform** — Redis streams/pub-sub, background model workers, distributed caching, idempotent jobs, and horizontal scaling.
 6. **Model lifecycle** — model registry, champion/challenger selection, feature/version metadata, automated evaluation, retraining triggers, and rollback controls.
@@ -56,15 +56,36 @@ v4.0 evolves the deployed analytics platform into a decision-support system that
 - One-factor-at-a-time sensitivity analysis
 - Ranked probability swings and local slopes
 
+### AI insight layer
+
+#### Endpoints
+
+- `POST /api/v4/insights/change`
+- `POST /api/v4/insights/upset-alert`
+- `POST /api/v4/insights/confidence`
+- `POST /api/v4/insights/recommendations`
+- `POST /api/v4/insights/history`
+
+#### Capabilities
+
+- Previous/current prediction comparison with material-change detection
+- Ranked evidence drivers with source and observed-time metadata
+- Explained and unexplained probability deltas
+- Market/model side-disagreement upset alerts with severity thresholds
+- Confidence scoring from probability strength, agreement, sample support, and freshness
+- Evidence-linked recommendations with priority and evidence IDs
+- Low-confidence hold recommendation
+- Chronological decision snapshots and material transition summaries
+
 ## Guardrails
 
 - v3.x API contracts remain unchanged.
-- Decisions and simulations are grounded in supplied structured inputs; the engine does not invent source data.
-- All scenario changes are explicit and returned with their reasons.
-- Reliability weights, model contributions, adjustments, seeds, and distribution summaries remain inspectable.
-- Simulation counts and scenario impacts are bounded to protect runtime and output stability.
+- Decisions, simulations, and insights are grounded in supplied structured inputs; the engine does not invent source data.
+- All scenario and prediction changes are explicit and returned with their reasons.
+- Reliability weights, model contributions, adjustments, seeds, evidence sources, and distribution summaries remain inspectable.
+- Simulation counts, scenario impacts, and evidence impacts are bounded to protect runtime and output stability.
 - The engine remains dependency-light so it can later move into background workers without changing the public contract.
 
 ## Next increment
 
-The next v4.0 increment should add the AI insight layer: structured driver analysis, prediction-change explanations, upset alerts, confidence reasoning, evidence-linked recommendations, and decision-change history.
+The next v4.0 increment should add advanced scouting: player similarity, team-style clustering, personnel and formation tendencies, matchup strengths, and exploitable weaknesses.
