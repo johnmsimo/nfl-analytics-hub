@@ -74,10 +74,13 @@ def _page_response(filename: str) -> Response:
 
 @app.after_request
 def _gzip_json(resp: Response):
-    if (resp.mimetype == "application/json" and resp.status_code == 200
-            and not resp.direct_passthrough
-            and len(resp.get_data()) > 4096
-            and "gzip" in (request.headers.get("Accept-Encoding") or "")):
+    if (
+        resp.mimetype == "application/json"
+        and resp.status_code == 200
+        and not resp.direct_passthrough
+        and len(resp.get_data()) > 4096
+        and "gzip" in (request.headers.get("Accept-Encoding") or "")
+    ):
         resp.set_data(gzip.compress(resp.get_data(), 6))
         resp.headers["Content-Encoding"] = "gzip"
         resp.headers["Content-Length"] = str(len(resp.get_data()))
@@ -176,6 +179,7 @@ def ready():
     try:
         from sqlalchemy import text
         from database import db
+
         db.session.execute(text("SELECT 1"))
         return jsonify({"ok": True, "database": "ready"})
     except Exception:
@@ -187,6 +191,7 @@ def ready():
 def metrics():
     from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
     from prometheus_client import CollectorRegistry
+
     registry = CollectorRegistry()
     uptime = Gauge("nfl_hub_process_uptime_seconds", "Process uptime", registry=registry)
     uptime.set(time.time() - _BOOT_TS)
@@ -196,21 +201,24 @@ def metrics():
 @app.route("/api/status")
 def api_status():
     import odds_api
+
     season = nfl_data.default_season()
     stats_season = None
     try:
         stats_season = nfl_data.stats_season(season)
     except Exception:  # noqa: BLE001
         pass
-    return jsonify({
-        "app": "nfl-analytics-hub",
-        "uptime_sec": round(time.time() - _BOOT_TS, 1),
-        "season": season,
-        "current_week": _safe(nfl_data.current_week),
-        "stats_season": stats_season,
-        "odds_api_configured": odds_api.is_configured(),
-        "data_dir": nfl_data.DATA_DIR,
-    })
+    return jsonify(
+        {
+            "app": "nfl-analytics-hub",
+            "uptime_sec": round(time.time() - _BOOT_TS, 1),
+            "season": season,
+            "current_week": _safe(nfl_data.current_week),
+            "stats_season": stats_season,
+            "odds_api_configured": odds_api.is_configured(),
+            "data_dir": nfl_data.DATA_DIR,
+        }
+    )
 
 
 def _safe(fn, *a):
@@ -234,6 +242,7 @@ from routes.v2_api import v2_bp  # noqa: E402
 from routes.ask import ask_bp  # noqa: E402
 from routes.feeds import feeds_bp  # noqa: E402
 from routes.analytics_api import analytics_api_bp  # noqa: E402
+from routes.v32_api import v32_bp  # noqa: E402
 
 app.register_blueprint(games_bp)
 app.register_blueprint(props_bp)
@@ -249,6 +258,7 @@ app.register_blueprint(v2_bp)
 app.register_blueprint(ask_bp)
 app.register_blueprint(feeds_bp)
 app.register_blueprint(analytics_api_bp)
+app.register_blueprint(v32_bp)
 
 _preload_started = False
 
@@ -263,6 +273,7 @@ def _preload_caches() -> None:
         nfl_data.preload()
         try:
             import tracker
+
             tracker.start_background_workers()
         except Exception as e:  # noqa: BLE001
             print(f"[preload] tracker workers: {e}")
