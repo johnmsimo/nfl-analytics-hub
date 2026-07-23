@@ -9,8 +9,8 @@ import os
 from pathlib import Path
 
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
@@ -38,19 +38,21 @@ def configure_database(app: Flask) -> None:
     default_path.parent.mkdir(parents=True, exist_ok=True)
     url = os.environ.get("DATABASE_URL", f"sqlite:///{default_path}")
     if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
+        url = "postgresql://" + url[len("postgres://") :]
     # Only psycopg3 is installed; a bare postgresql:// URL (what
     # `fly postgres attach` exports) makes SQLAlchemy try psycopg2 and crash.
     if url.startswith("postgresql://"):
-        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
     engine_options = {"pool_pre_ping": True, "pool_recycle": 300}
     if url.startswith("postgresql"):
-        engine_options.update({
-            "pool_size": int(os.environ.get("DB_POOL_SIZE", "10")),
-            "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "20")),
-            "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", "30")),
-            "connect_args": {"application_name": "nfl-analytics-hub"},
-        })
+        engine_options.update(
+            {
+                "pool_size": int(os.environ.get("DB_POOL_SIZE", "10")),
+                "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "20")),
+                "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", "30")),
+                "connect_args": {"application_name": "nfl-analytics-hub"},
+            }
+        )
     app.config.update(
         SQLALCHEMY_DATABASE_URI=url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
@@ -61,18 +63,20 @@ def configure_database(app: Flask) -> None:
 
 
 def _should_create_schema() -> bool:
-    """Allow convenience schema creation locally, never implicitly in production."""
-    if os.environ.get("AUTO_CREATE_SCHEMA", "").lower() in {"1", "true", "yes"}:
-        return True
+    """Allow convenience schema creation locally, never implicitly in CI/production."""
+    configured = os.environ.get("AUTO_CREATE_SCHEMA")
+    if configured is not None:
+        return configured.lower() in {"1", "true", "yes"}
     environment = os.environ.get("APP_ENV", os.environ.get("FLASK_ENV", "development")).lower()
-    return environment != "production"
+    return environment == "development"
 
 
 def init_database(app: Flask) -> None:
     with app.app_context():
         # Import model metadata for Flask-Migrate and local schema creation.
         import db_models  # noqa: F401, PLC0415
+
         if _should_create_schema():
             db.create_all()
         else:
-            app.logger.info("Production schema creation skipped; migrations manage the database")
+            app.logger.info("Automatic schema creation skipped; migrations manage the database")
