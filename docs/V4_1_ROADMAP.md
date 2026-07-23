@@ -67,7 +67,7 @@ v4.1 builds a transparent scouting layer on the v4.0 decision, simulation, and i
 - History ordering uses explicit `sort_key`, season/week values, or stable input order.
 - Opponent adjustments require an explicit baseline for every compared metric.
 - Roster and role transitions report only observed changes between supplied snapshots.
-- Season comparisons require explicit metric direction and never infer improvement semantics.
+- Season comparisons default to higher-is-better unless a metric is explicitly marked lower-is-better.
 - Small samples remain visible through snap counts and caller-selected minimum thresholds.
 - Ranking and tie-breaking are deterministic, and result sizes are bounded.
 - The engine remains framework-independent and dependency-light.
