@@ -34,19 +34,41 @@ provider-neutral while Redis and external workers are introduced incrementally.
 - Deterministic, inspectable event IDs and monotonic caller-supplied sequences
 - Bounded in-memory reference registry for tests and single-process development
 
+## v4.2.1 endpoints
+
+- `GET /api/v4.2/transport/capabilities`
+- `POST /api/v4.2/transport/leases/normalize`
+
+## v4.2.1 Redis Streams transport
+
+- Redis Streams queue with atomic, conflict-safe idempotent enqueueing
+- Consumer-group creation and bounded batch claims
+- Explicit, deterministic worker leases with configurable expiry
+- Terminal-state acknowledgements restricted to the lease owner
+- Stale pending-message recovery through `XAUTOCLAIM`
+- Retry-aware recovery that never bypasses the v4.2.0 attempt limit
+- Thread-safe in-memory fallback with the same enqueue, claim, acknowledgement, and recovery
+  semantics for local development
+- Redis selection through `REDIS_URL`; configured Redis failures remain visible instead of
+  silently switching a production workload to process-local memory
+- Redis integration tests use the existing CI Redis 7 service
+
 ## Guardrails
 
 - Existing v3.x, v4.0, and v4.1 contracts remain unchanged.
-- v4.2.0 defines contracts and validation; it does not claim distributed execution.
+- v4.2.0 defines contracts and validation; v4.2.1 adds transport but does not execute handlers.
 - Arbitrary functions, modules, shell commands, and caller-supplied code are never executed.
 - Job and event identities are deterministic, while timestamps remain explicit.
 - A reused caller idempotency key with a different payload is a visible conflict.
 - Job types, namespaces, priorities, attempts, payloads, results, errors, and identifiers are
   bounded.
 - Terminal jobs cannot be restarted; failed jobs can be requeued only while attempts remain.
-- Redis and external workers must preserve these contracts and failure semantics.
+- Redis and external workers preserve the v4.2.0 job envelope and failure semantics.
+- Acknowledgements require a terminal job and matching lease owner.
+- Expired leases fail the active attempt before retrying; exhausted jobs are acknowledged as
+  failed instead of cycling indefinitely.
 
 ## Next increment
 
-v4.2.1 will add Redis Streams transport, consumer groups, worker leases, acknowledgements,
-stale-lease recovery, and an in-memory fallback without changing the v4.2.0 job envelope.
+v4.2.2 will add typed background handlers for model, simulation, scouting, backfill, and
+report jobs, with timeouts, cancellation, and result persistence.
