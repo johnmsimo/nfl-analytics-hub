@@ -243,6 +243,7 @@ from routes.ask import ask_bp  # noqa: E402
 from routes.feeds import feeds_bp  # noqa: E402
 from routes.analytics_api import analytics_api_bp  # noqa: E402
 from routes.v32_api import v32_bp  # noqa: E402
+from routes.v32_release_api import v32_release_bp  # noqa: E402
 
 app.register_blueprint(games_bp)
 app.register_blueprint(props_bp)
@@ -259,6 +260,7 @@ app.register_blueprint(ask_bp)
 app.register_blueprint(feeds_bp)
 app.register_blueprint(analytics_api_bp)
 app.register_blueprint(v32_bp)
+app.register_blueprint(v32_release_bp)
 
 _preload_started = False
 
