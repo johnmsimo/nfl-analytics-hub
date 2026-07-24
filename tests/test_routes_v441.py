@@ -58,7 +58,7 @@ def test_capabilities_expose_v441_persistence_and_key_guarantees(
 ):
     client, _ = enterprise_client
     body = client.get("/api/v4.4/capabilities").get_json()
-    assert body["version"] == "4.4.1"
+    assert body["version"] == "4.4.2"
     assert body["contract_version"] == "4.4.0"
     assert body["features"]["persistent_tenant_directory"] is True
     assert body["features"]["enterprise_route_tenant_enforcement"] is True

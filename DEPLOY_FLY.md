@@ -36,7 +36,11 @@ DATABASE_URL=postgresql+psycopg://...
 REDIS_URL=redis://...
 ```
 
-Do not use SQLite for the deployed warehouse. Redis provides distributed rate limiting and shared JSON caching across Gunicorn workers. When Redis is unavailable, both services fall back to process-local memory so the application remains available, but limits and cached entries are no longer shared across Machines.
+Do not use SQLite for the deployed warehouse. Redis provides distributed rate limiting, shared
+JSON caching, and v4.4.2 enterprise quota accounting across Gunicorn workers. Legacy rate
+limiting and caching can fall back to process-local memory, but v4.4.2 public decision APIs fail
+closed when production Redis is unavailable so organization and credential quotas cannot be
+bypassed across Machines.
 
 ## 5. Set Fly secrets
 
@@ -65,11 +69,19 @@ HTTP_TIMEOUT_SEC=25
 HTTP_RETRY_TOTAL=3
 HTTP_RETRY_BACKOFF_SEC=0.5
 HTTP_USER_AGENT=nfl-analytics-hub/3.0
+V44_ORGANIZATION_QUOTA=1000
+V44_CREDENTIAL_QUOTA=100
+V44_QUOTA_WINDOW_SECONDS=60
 ```
 
 `API_KEY_PEPPER` must remain stable while v4.4.1 API credentials are active. The application
 falls back to `SECRET_KEY` when no dedicated pepper is configured, but production should set an
 independent value so session-secret rotation does not invalidate every issued API key.
+
+The v4.4.2 quota values are default fixed-window limits. Organization owners can store bounded
+overrides through the v4.4 quota API. Confirm `REDIS_URL` is reachable before exposing public
+decision credentials; quota-protected endpoints return `503 QUOTA_BACKEND_UNAVAILABLE` instead
+of using process-local counters in production.
 
 Every response includes `X-Request-ID`. Incoming `X-Request-ID` values are preserved, which allows Fly proxy logs, application logs, and client reports to be correlated. Outbound provider calls record host-level success, failure, latency, and last-error telemetry in-process.
 
@@ -106,6 +118,9 @@ Also verify:
 - Worker Machine is running.
 - Migrations completed.
 - PostgreSQL and Redis connections succeed.
+- A scoped v4.4 API key can call a public decision endpoint with an `Idempotency-Key`.
+- Repeating that exact request reports an idempotent replay without increasing usage.
+- Quota responses include organization/credential remaining counts and a reset time.
 - Responses include `X-Request-ID`.
 - Structured request logs contain status and duration fields.
 - No optional provider secret appears in logs.

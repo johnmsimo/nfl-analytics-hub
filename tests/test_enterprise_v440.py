@@ -231,11 +231,11 @@ def test_reference_directory_authorizes_registered_membership():
 
 def test_manifest_discloses_persistence_and_runtime_boundaries():
     manifest = enterprise_manifest()
-    assert manifest["version"] == "4.4.1"
+    assert manifest["version"] == "4.4.2"
     assert manifest["contract_version"] == "4.4.0"
     assert manifest["features"]["deny_by_default_authorization"] is True
     assert manifest["features"]["persistent_tenant_directory"] is True
     assert manifest["features"]["enterprise_route_tenant_enforcement"] is True
     assert manifest["features"]["runtime_tenant_enforcement"] is False
     assert manifest["features"]["api_keys"] is True
-    assert "v4.4.2" in manifest["next_increment"]
+    assert "v4.4.3" in manifest["next_increment"]
