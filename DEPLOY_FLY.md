@@ -43,6 +43,7 @@ Do not use SQLite for the deployed warehouse. Redis provides distributed rate li
 ```bash
 fly secrets set \
   SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+  API_KEY_PEPPER="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
   DATABASE_URL="postgresql+psycopg://..." \
   REDIS_URL="redis://..." \
   NWS_USER_AGENT="nfl-analytics-hub/3.0 your-email@example.com"
@@ -65,6 +66,10 @@ HTTP_RETRY_TOTAL=3
 HTTP_RETRY_BACKOFF_SEC=0.5
 HTTP_USER_AGENT=nfl-analytics-hub/3.0
 ```
+
+`API_KEY_PEPPER` must remain stable while v4.4.1 API credentials are active. The application
+falls back to `SECRET_KEY` when no dedicated pepper is configured, but production should set an
+independent value so session-secret rotation does not invalidate every issued API key.
 
 Every response includes `X-Request-ID`. Incoming `X-Request-ID` values are preserved, which allows Fly proxy logs, application logs, and client reports to be correlated. Outbound provider calls record host-level success, failure, latency, and last-error telemetry in-process.
 

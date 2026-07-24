@@ -43,6 +43,28 @@ backward-compatible with the existing v3 and v4 contracts.
 - Contract-version, identity, metadata-fingerprint, and role-permission consistency checks
 - Bounded in-memory reference directory for deterministic tests and local development
 
+## v4.4.1 Persistent identity and API keys
+
+- SQLAlchemy-backed organizations and memberships with deterministic v4.4.0 contract identities
+- Atomic organization bootstrap with an initial user owner membership
+- Persistent user and service-subject memberships with unique tenant/subject identity
+- Tenant-aware authenticated sessions that revalidate membership state and permissions
+- High-entropy API credentials whose plaintext value is returned once and never persisted
+- Server-peppered HMAC-SHA256 credential digests with bounded lookup prefixes
+- Least-privilege credential scopes constrained by the subject's current membership
+- Explicit credential expiry, last-use metadata, idempotent revocation, and atomic rotation
+- API-key authentication limited to v4.4 enterprise routes
+- Migration-managed organization, membership, and credential tables for SQLite/PostgreSQL
+
+## v4.4.1 endpoints
+
+- `POST /api/v4.4/directory/organizations`
+- `POST /api/v4.4/directory/organizations/{organization_id}/memberships`
+- `GET|PUT|DELETE /api/v4.4/session/tenant`
+- `GET|POST /api/v4.4/directory/organizations/{organization_id}/api-keys`
+- `POST /api/v4.4/directory/organizations/{organization_id}/api-keys/{api_key_id}/rotate`
+- `POST /api/v4.4/directory/organizations/{organization_id}/api-keys/{api_key_id}/revoke`
+
 ## Guardrails
 
 - Existing v3.x and v4.0–v4.3 endpoint contracts remain unchanged.
@@ -60,9 +82,18 @@ backward-compatible with the existing v3 and v4 contracts.
   and runtime request enforcement remain disabled in v4.4.0.
 - No v4.4.0 endpoint grants access to an existing route, changes a session, creates a credential,
   or mutates production data.
+- API-key plaintext is returned only at issuance or rotation; the database stores only a
+  server-peppered digest and a non-secret lookup prefix.
+- API-key scopes can only reduce a persistent membership's permissions and are revalidated on
+  every authenticated request.
+- API-key authentication is deliberately rejected outside `/api/v4.4/`; existing session
+  authorization and v3/v4 route behavior remain unchanged.
+- Persistent changes use SQL transactions and require the v4.4.1 migration in production.
+- v4.4.1 does not add quotas, usage metering, public decision endpoints, shared workspace
+  persistence, enterprise exports, or retention controls.
 
 ## Next increment
 
-v4.4.1 should persist organizations and memberships, resolve tenant context into authenticated
-sessions, and add hashed, scoped, expiring, revocable API credentials without storing plaintext
-secrets.
+v4.4.2 should add Redis-backed, idempotent usage accounting; organization and credential quotas;
+stable public decision endpoints; and inspectable limit responses without weakening v4.4.1
+tenant and credential enforcement.

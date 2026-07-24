@@ -1,4 +1,5 @@
 """Authentication, CSRF, distributed rate limiting, and security headers."""
+
 from __future__ import annotations
 
 import hmac
@@ -10,8 +11,9 @@ import threading
 import time
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from flask import abort, g, jsonify, make_response, redirect, request, session, url_for
 
@@ -75,7 +77,39 @@ def configure_security(app) -> None:
     def _auth_and_csrf():
         if request.endpoint is None:
             return None
-        if request.endpoint in _PUBLIC_ENDPOINTS or request.path.startswith("/static/") or request.path == "/api/auth/login":
+        g.enterprise_api_key = None
+        supplied_api_key = request.headers.get("X-API-Key")
+        if supplied_api_key:
+            if not request.path.startswith("/api/v4.4/"):
+                return (
+                    jsonify(
+                        {
+                            "error": "API keys are limited to v4.4 enterprise routes",
+                            "code": "API_KEY_ROUTE_UNSUPPORTED",
+                        }
+                    ),
+                    401,
+                )
+            try:
+                from enterprise_identity_v441 import authenticate_api_key
+
+                g.enterprise_api_key = authenticate_api_key(supplied_api_key)
+            except (PermissionError, RuntimeError, ValueError):
+                return (
+                    jsonify(
+                        {
+                            "error": "invalid or inactive API credential",
+                            "code": "INVALID_API_KEY",
+                        }
+                    ),
+                    401,
+                )
+            return None
+        if (
+            request.endpoint in _PUBLIC_ENDPOINTS
+            or request.path.startswith("/static/")
+            or request.path == "/api/auth/login"
+        ):
             return None
         if os.getenv("AUTH_DISABLED", "0") == "1" and not _is_production():
             session.setdefault("user", {"username": "developer", "name": "Developer"})
@@ -133,21 +167,36 @@ def establish_session(username: str) -> dict[str, str]:
 
 def json_body(*, allowed: set[str] | None = None, required: set[str] | None = None) -> dict[str, Any]:
     if not request.is_json:
-        abort(make_response(jsonify({"error": "Content-Type must be application/json", "code": "INVALID_CONTENT_TYPE"}), 415))
+        abort(
+            make_response(
+                jsonify({"error": "Content-Type must be application/json", "code": "INVALID_CONTENT_TYPE"}),
+                415,
+            )
+        )
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         abort(make_response(jsonify({"error": "JSON object required", "code": "INVALID_JSON"}), 400))
     if allowed is not None:
         unknown = sorted(set(payload) - allowed)
         if unknown:
-            abort(make_response(jsonify({"error": f"unknown fields: {', '.join(unknown)}", "code": "UNKNOWN_FIELDS"}), 400))
+            abort(
+                make_response(
+                    jsonify({"error": f"unknown fields: {', '.join(unknown)}", "code": "UNKNOWN_FIELDS"}), 400
+                )
+            )
     missing = sorted((required or set()) - set(payload))
     if missing:
-        abort(make_response(jsonify({"error": f"missing fields: {', '.join(missing)}", "code": "MISSING_FIELDS"}), 400))
+        abort(
+            make_response(
+                jsonify({"error": f"missing fields: {', '.join(missing)}", "code": "MISSING_FIELDS"}), 400
+            )
+        )
     return payload
 
 
-def bounded_number(payload: dict[str, Any], key: str, low: float, high: float, *, required: bool = False) -> float | None:
+def bounded_number(
+    payload: dict[str, Any], key: str, low: float, high: float, *, required: bool = False
+) -> float | None:
     if key not in payload:
         if required:
             abort(make_response(jsonify({"error": f"{key} is required"}), 400))
@@ -174,7 +223,9 @@ class RateLimiter:
         url = os.getenv("REDIS_URL")
         if url and redis is not None:
             try:
-                client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
+                client = redis.Redis.from_url(
+                    url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1
+                )
                 client.ping()
                 self._redis = client
             except Exception:
@@ -215,12 +266,16 @@ class RateLimiter:
                 bucket = f"{request.endpoint}:{identity}"
                 allowed, retry = self._allowed(bucket, count, seconds)
                 if not allowed:
-                    resp = jsonify({"error": "rate limit exceeded", "code": "RATE_LIMITED", "retry_after": retry})
+                    resp = jsonify(
+                        {"error": "rate limit exceeded", "code": "RATE_LIMITED", "retry_after": retry}
+                    )
                     resp.status_code = 429
                     resp.headers["Retry-After"] = str(retry)
                     return resp
                 return fn(*args, **kwargs)
+
             return wrapped
+
         return decorator
 
 

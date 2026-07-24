@@ -3,15 +3,16 @@
 Raw facts are stored at game/player-game grain. Derived metrics are versioned
 in analytics_snapshots so model outputs can be reproduced and audited.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from database import db
 
 
 def utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TimestampMixin:
@@ -158,7 +159,9 @@ class CoachingAssignment(TimestampMixin, db.Model):
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
 
-    __table_args__ = (db.UniqueConstraint("coach_id", "team_id", "season", "role", name="uq_coach_assignment"),)
+    __table_args__ = (
+        db.UniqueConstraint("coach_id", "team_id", "season", "role", name="uq_coach_assignment"),
+    )
 
 
 class AnalyticsSnapshot(TimestampMixin, db.Model):
@@ -175,7 +178,15 @@ class AnalyticsSnapshot(TimestampMixin, db.Model):
     calculated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
     __table_args__ = (
-        db.UniqueConstraint("entity_type", "entity_id", "season", "week", "metric", "model_version", name="uq_analytics_snapshot"),
+        db.UniqueConstraint(
+            "entity_type",
+            "entity_id",
+            "season",
+            "week",
+            "metric",
+            "model_version",
+            name="uq_analytics_snapshot",
+        ),
     )
 
 
@@ -190,6 +201,7 @@ class DataSyncRun(db.Model):
     records_written = db.Column(db.Integer, nullable=False, default=0)
     error = db.Column(db.Text)
     details = db.Column(db.JSON)
+
 
 class TeamSeasonStat(TimestampMixin, db.Model):
     __tablename__ = "team_season_stats"
@@ -304,7 +316,9 @@ class RawIngestRecord(db.Model):
     ingested_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
     __table_args__ = (
-        db.UniqueConstraint("source_id", "entity_type", "external_id", "payload_hash", name="uq_raw_ingest_version"),
+        db.UniqueConstraint(
+            "source_id", "entity_type", "external_id", "payload_hash", name="uq_raw_ingest_version"
+        ),
         db.Index("ix_raw_ingest_lookup", "source_id", "entity_type", "external_id"),
     )
 
@@ -328,6 +342,7 @@ class SchemaVersion(db.Model):
     version = db.Column(db.String(40), primary_key=True)
     applied_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     description = db.Column(db.String(240))
+
 
 class Play(TimestampMixin, db.Model):
     __tablename__ = "plays"
@@ -451,7 +466,9 @@ class Prediction(TimestampMixin, db.Model):
     evaluated_at = db.Column(db.DateTime(timezone=True))
 
     __table_args__ = (
-        db.UniqueConstraint("model_version_id", "entity_type", "entity_id", "game_id", "target", name="uq_prediction_identity"),
+        db.UniqueConstraint(
+            "model_version_id", "entity_type", "entity_id", "game_id", "target", name="uq_prediction_identity"
+        ),
         db.Index("ix_predictions_dashboard", "season", "week", "target"),
     )
 
@@ -480,6 +497,86 @@ class AuditLog(db.Model):
     details = db.Column(db.JSON)
     ip_address = db.Column(db.String(64))
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class EnterpriseOrganization(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_organizations"
+    organization_id = db.Column(db.String(24), primary_key=True)
+    slug = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)
+    data_region = db.Column(db.String(80))
+    tags = db.Column(db.JSON, nullable=False, default=list)
+    created_by_type = db.Column(db.String(16), nullable=False)
+    created_by_id = db.Column(db.String(160), nullable=False)
+    metadata_digest = db.Column(db.String(71), nullable=False)
+    contract_version = db.Column(db.String(16), nullable=False)
+    contract_created_at = db.Column(db.Float, nullable=False)
+
+
+class EnterpriseMembership(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_memberships"
+    membership_id = db.Column(db.String(31), primary_key=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subject_type = db.Column(db.String(16), nullable=False)
+    subject_id = db.Column(db.String(160), nullable=False)
+    role = db.Column(db.String(16), nullable=False, index=True)
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)
+    permissions = db.Column(db.JSON, nullable=False)
+    granted_by_type = db.Column(db.String(16), nullable=False)
+    granted_by_id = db.Column(db.String(160), nullable=False)
+    metadata_digest = db.Column(db.String(71), nullable=False)
+    contract_version = db.Column(db.String(16), nullable=False)
+    contract_granted_at = db.Column(db.Float, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "organization_id",
+            "subject_type",
+            "subject_id",
+            name="uq_enterprise_membership_subject",
+        ),
+    )
+
+
+class EnterpriseApiKey(db.Model):
+    __tablename__ = "enterprise_api_keys"
+    api_key_id = db.Column(db.String(27), primary_key=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subject_type = db.Column(db.String(16), nullable=False)
+    subject_id = db.Column(db.String(160), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    prefix = db.Column(db.String(16), nullable=False, unique=True, index=True)
+    secret_digest = db.Column(db.String(64), nullable=False)
+    scopes = db.Column(db.JSON, nullable=False)
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)
+    issued_by_type = db.Column(db.String(16), nullable=False)
+    issued_by_id = db.Column(db.String(160), nullable=False)
+    issued_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    last_used_at = db.Column(db.DateTime(timezone=True))
+    revoked_at = db.Column(db.DateTime(timezone=True))
+    rotated_from_id = db.Column(
+        db.String(27),
+        db.ForeignKey("enterprise_api_keys.api_key_id", ondelete="SET NULL"),
+    )
+
 
 class InjuryReport(TimestampMixin, db.Model):
     __tablename__ = "injury_reports"
@@ -515,7 +612,9 @@ class DepthChartEntry(TimestampMixin, db.Model):
     source_key = db.Column(db.String(80), nullable=False, default="nflverse")
     raw_payload = db.Column(db.JSON)
     __table_args__ = (
-        db.UniqueConstraint("player_id", "team_id", "chart_date", "depth_position", name="uq_depth_chart_entry"),
+        db.UniqueConstraint(
+            "player_id", "team_id", "chart_date", "depth_position", name="uq_depth_chart_entry"
+        ),
         db.Index("ix_depth_chart_current", "season", "week", "team_id", "depth_position", "depth_rank"),
     )
 
@@ -554,6 +653,7 @@ class LeagueTransaction(TimestampMixin, db.Model):
     source_key = db.Column(db.String(80), nullable=False, default="nflverse")
     raw_payload = db.Column(db.JSON)
 
+
 class WeatherObservation(TimestampMixin, db.Model):
     __tablename__ = "weather_observations"
     id = db.Column(db.Integer, primary_key=True)
@@ -591,6 +691,8 @@ class OddsSnapshot(TimestampMixin, db.Model):
     source_key = db.Column(db.String(80), nullable=False, default="the-odds-api")
     raw_payload = db.Column(db.JSON)
     __table_args__ = (
-        db.UniqueConstraint("game_id", "bookmaker", "market", "outcome", "captured_at", name="uq_odds_snapshot"),
+        db.UniqueConstraint(
+            "game_id", "bookmaker", "market", "outcome", "captured_at", name="uq_odds_snapshot"
+        ),
         db.Index("ix_odds_game_market_time", "game_id", "market", "captured_at"),
     )
