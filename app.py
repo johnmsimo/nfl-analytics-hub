@@ -130,6 +130,11 @@ def page_scouting():
     return _page_response("scouting.html")
 
 
+@app.route("/model-operations")
+def page_model_operations():
+    return _page_response("model_operations.html")
+
+
 @app.route("/rankings")
 def page_rankings():
     return _page_response("rankings.html")

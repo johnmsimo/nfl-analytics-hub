@@ -158,7 +158,7 @@ def test_capabilities_expose_v432_controls_and_endpoints():
     response = _client().get("/api/v4.3/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.3.2"
+    assert body["version"] == "4.3.3"
     assert body["features"]["distributed_retraining_requests"] is True
     assert body["features"]["automatic_training"] is False
     assert body["endpoints"]["rollout_step_evaluate"].endswith("/rollouts/steps/evaluate")
