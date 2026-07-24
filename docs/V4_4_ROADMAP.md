@@ -65,6 +65,28 @@ backward-compatible with the existing v3 and v4 contracts.
 - `POST /api/v4.4/directory/organizations/{organization_id}/api-keys/{api_key_id}/rotate`
 - `POST /api/v4.4/directory/organizations/{organization_id}/api-keys/{api_key_id}/revoke`
 
+## v4.4.2 Quotas and public decision APIs
+
+- Redis-backed atomic usage accounting across web processes and Machines
+- Development-only thread-safe in-memory adapter with the same quota contract
+- Fixed-window organization and per-credential request limits
+- Organization-owned quota overrides with bounded limits and windows
+- Mandatory idempotency keys bound to the exact operation and JSON payload
+- Replay-safe metering that never charges an accepted request twice
+- Conflict detection when an idempotency key is reused for different content
+- API-key-only public ensemble, scenario, and decision-brief endpoints
+- Current tenant, membership, scope, expiry, and revocation revalidation on every request
+- Inspectable usage snapshots, `429` bodies, retry timing, and rate-limit headers
+- Fail-closed `503` responses when the production Redis quota backend is unavailable
+
+## v4.4.2 endpoints
+
+- `GET|PUT /api/v4.4/directory/organizations/{organization_id}/quotas`
+- `GET /api/v4.4/directory/organizations/{organization_id}/usage`
+- `POST /api/v4.4/public/decisions/ensemble`
+- `POST /api/v4.4/public/decisions/scenario`
+- `POST /api/v4.4/public/decisions/brief`
+
 ## Guardrails
 
 - Existing v3.x and v4.0–v4.3 endpoint contracts remain unchanged.
@@ -89,11 +111,20 @@ backward-compatible with the existing v3 and v4 contracts.
 - API-key authentication is deliberately rejected outside `/api/v4.4/`; existing session
   authorization and v3/v4 route behavior remain unchanged.
 - Persistent changes use SQL transactions and require the v4.4.1 migration in production.
-- v4.4.1 does not add quotas, usage metering, public decision endpoints, shared workspace
-  persistence, enterprise exports, or retention controls.
+- Public decision endpoints require a valid v4.4 API key with `decision.execute`; tenant
+  sessions cannot use the public credential surface.
+- Public decision requests require an `Idempotency-Key` and bind it to the exact operation and
+  payload for 24 hours.
+- Quota accounting is fixed-window and atomic across both organization and credential counters.
+- Production quota enforcement requires Redis and fails closed when it is unavailable; the
+  in-memory backend is development-only and does not claim distributed enforcement.
+- Existing `/api/v4` decision endpoints remain unchanged and are not silently placed behind the
+  v4.4 enterprise quota boundary.
+- v4.4.2 does not add shared workspace persistence, enterprise audit history, administration
+  UI, exports, or retention controls.
 
 ## Next increment
 
-v4.4.2 should add Redis-backed, idempotent usage accounting; organization and credential quotas;
-stable public decision endpoints; and inspectable limit responses without weakening v4.4.1
-tenant and credential enforcement.
+v4.4.3 should add tenant-scoped saved decisions and reports, collaboration controls,
+append-only enterprise audit history, an administration workspace, and export/retention
+controls without weakening the v4.4.0-v4.4.2 identity, credential, and quota boundaries.
