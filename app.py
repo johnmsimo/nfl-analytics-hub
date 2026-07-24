@@ -135,6 +135,11 @@ def page_model_operations():
     return _page_response("model_operations.html")
 
 
+@app.route("/enterprise-operations")
+def page_enterprise_operations():
+    return _page_response("enterprise_operations.html")
+
+
 @app.route("/rankings")
 def page_rankings():
     return _page_response("rankings.html")

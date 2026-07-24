@@ -12,7 +12,7 @@ from copy import deepcopy
 from typing import Any
 
 VERSION = "4.4.0"
-RELEASE_VERSION = "4.4.2"
+RELEASE_VERSION = "4.4.3"
 MAX_TAGS = 20
 MAX_MEMBERSHIPS_PER_DECISION = 100
 MAX_ORGANIZATIONS = 1_000
@@ -498,7 +498,14 @@ def enterprise_manifest() -> dict[str, Any]:
             "idempotent_request_metering": True,
             "inspectable_limit_responses": True,
             "quotas": True,
-            "shared_workspaces": False,
+            "shared_workspaces": True,
+            "workspace_collaboration": True,
+            "saved_decisions": True,
+            "enterprise_reports": True,
+            "append_only_enterprise_audit": True,
+            "enterprise_exports": True,
+            "retention_controls": True,
+            "retention_hard_delete": False,
             "public_decision_apis": True,
             "public_decision_api_key_required": True,
         },
@@ -514,5 +521,5 @@ def enterprise_manifest() -> dict[str, Any]:
             "reference_organizations": MAX_ORGANIZATIONS,
             "reference_memberships": MAX_MEMBERSHIPS,
         },
-        "next_increment": "v4.4.3 Shared Workspaces and Enterprise Operations",
+        "next_increment": None,
     }

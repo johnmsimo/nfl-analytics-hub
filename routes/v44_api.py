@@ -20,6 +20,24 @@ from enterprise_identity_v441 import (
     revoke_api_key,
     rotate_api_key,
 )
+from enterprise_operations_v443 import (
+    apply_retention,
+    create_workspace,
+    export_workspace_data,
+    get_retention_policy,
+    list_audit_events,
+    list_collaborators,
+    list_decisions,
+    list_reports,
+    list_workspaces,
+    operations_manifest,
+    remove_collaborator,
+    save_decision,
+    save_report,
+    set_collaborator,
+    update_retention_policy,
+    update_workspace,
+)
 from enterprise_quota_v442 import (
     IdempotencyConflictError,
     QuotaExceededError,
@@ -218,6 +236,14 @@ def _finite_number(value: Any, field: str) -> float:
     return result
 
 
+def _enterprise_operation_error(exc: Exception):
+    if isinstance(exc, KeyError):
+        return jsonify({"error": str(exc), "code": "ENTERPRISE_RESOURCE_NOT_FOUND"}), 404
+    if isinstance(exc, PermissionError):
+        return jsonify({"error": str(exc), "code": "ENTERPRISE_ACCESS_DENIED"}), 403
+    return jsonify({"error": str(exc), "code": "INVALID_ENTERPRISE_OPERATION"}), 400
+
+
 @v44_bp.get("/capabilities")
 def capabilities():
     manifest = enterprise_manifest()
@@ -239,8 +265,23 @@ def capabilities():
                 "public_decision_ensemble": "/api/v4.4/public/decisions/ensemble",
                 "public_decision_scenario": "/api/v4.4/public/decisions/scenario",
                 "public_decision_brief": "/api/v4.4/public/decisions/brief",
+                "workspaces": ("/api/v4.4/directory/organizations/{organization_id}/workspaces"),
+                "workspace_collaborators": (
+                    "/api/v4.4/directory/organizations/{organization_id}/"
+                    "workspaces/{workspace_id}/collaborators"
+                ),
+                "saved_decisions": (
+                    "/api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}/decisions"
+                ),
+                "reports": (
+                    "/api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}/reports"
+                ),
+                "audit": ("/api/v4.4/directory/organizations/{organization_id}/audit"),
+                "retention": ("/api/v4.4/directory/organizations/{organization_id}/retention"),
+                "exports": ("/api/v4.4/directory/organizations/{organization_id}/exports"),
             },
             "quota_contract": quota_manifest(),
+            "operations_contract": operations_manifest(),
         }
     )
 
@@ -545,6 +586,346 @@ def get_enterprise_usage(organization_id: str):
     snapshot["backend"] = backend.backend
     snapshot["distributed"] = backend.distributed
     return jsonify(snapshot)
+
+
+@v44_bp.get("/directory/organizations/<organization_id>/workspaces")
+def get_enterprise_workspaces(organization_id: str):
+    context, denied = _authorized(organization_id, "workspace.read")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        workspaces = list_workspaces(organization_id, context)
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(
+        {
+            "version": "4.4.3",
+            "organization_id": organization_id,
+            "workspaces": workspaces,
+        }
+    )
+
+
+@v44_bp.post("/directory/organizations/<organization_id>/workspaces")
+def create_enterprise_workspace(organization_id: str):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "workspace must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "workspace.manage")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        result = create_workspace(organization_id, payload, context)
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(result), 201 if result["accepted"] else 200
+
+
+@v44_bp.patch("/directory/organizations/<organization_id>/workspaces/<workspace_id>")
+def update_enterprise_workspace(organization_id: str, workspace_id: str):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "workspace update must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "workspace.manage")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        result = update_workspace(
+            organization_id,
+            workspace_id,
+            payload,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify({"version": "4.4.3", "workspace": result})
+
+
+@v44_bp.get("/directory/organizations/<organization_id>/workspaces/<workspace_id>/collaborators")
+def get_enterprise_workspace_collaborators(
+    organization_id: str,
+    workspace_id: str,
+):
+    context, denied = _authorized(organization_id, "workspace.read")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        collaborators = list_collaborators(
+            organization_id,
+            workspace_id,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(
+        {
+            "version": "4.4.3",
+            "organization_id": organization_id,
+            "workspace_id": workspace_id,
+            "collaborators": collaborators,
+        }
+    )
+
+
+@v44_bp.put("/directory/organizations/<organization_id>/workspaces/<workspace_id>/collaborators")
+def set_enterprise_workspace_collaborator(
+    organization_id: str,
+    workspace_id: str,
+):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "collaborator must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "workspace.manage")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        result = set_collaborator(
+            organization_id,
+            workspace_id,
+            payload,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(result), 201 if result["created"] else 200
+
+
+@v44_bp.delete(
+    "/directory/organizations/<organization_id>/workspaces/<workspace_id>/collaborators/<membership_id>"
+)
+def delete_enterprise_workspace_collaborator(
+    organization_id: str,
+    workspace_id: str,
+    membership_id: str,
+):
+    context, denied = _authorized(organization_id, "workspace.manage")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        removed = remove_collaborator(
+            organization_id,
+            workspace_id,
+            membership_id,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify({"version": "4.4.3", "removed": removed})
+
+
+@v44_bp.get("/directory/organizations/<organization_id>/workspaces/<workspace_id>/decisions")
+def get_enterprise_saved_decisions(
+    organization_id: str,
+    workspace_id: str,
+):
+    context, denied = _authorized(organization_id, "decision.read")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        decisions = list_decisions(
+            organization_id,
+            workspace_id,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(
+        {
+            "version": "4.4.3",
+            "organization_id": organization_id,
+            "workspace_id": workspace_id,
+            "decisions": decisions,
+        }
+    )
+
+
+@v44_bp.post("/directory/organizations/<organization_id>/workspaces/<workspace_id>/decisions")
+def create_enterprise_saved_decision(
+    organization_id: str,
+    workspace_id: str,
+):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "saved decision must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "decision.execute")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        decision = save_decision(
+            organization_id,
+            workspace_id,
+            payload,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify({"version": "4.4.3", "decision": decision}), 201
+
+
+@v44_bp.get("/directory/organizations/<organization_id>/workspaces/<workspace_id>/reports")
+def get_enterprise_reports(
+    organization_id: str,
+    workspace_id: str,
+):
+    context, denied = _authorized(organization_id, "decision.read")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        reports = list_reports(
+            organization_id,
+            workspace_id,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(
+        {
+            "version": "4.4.3",
+            "organization_id": organization_id,
+            "workspace_id": workspace_id,
+            "reports": reports,
+        }
+    )
+
+
+@v44_bp.post("/directory/organizations/<organization_id>/workspaces/<workspace_id>/reports")
+def create_enterprise_report(
+    organization_id: str,
+    workspace_id: str,
+):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "report must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "decision.execute")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        report = save_report(
+            organization_id,
+            workspace_id,
+            payload,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify({"version": "4.4.3", "report": report}), 201
+
+
+@v44_bp.get("/directory/organizations/<organization_id>/audit")
+def get_enterprise_audit(organization_id: str):
+    context, denied = _authorized(organization_id, "audit.read")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    workspace_id = request.args.get("workspace_id")
+    try:
+        limit = int(request.args.get("limit", "100"))
+        result = list_audit_events(
+            organization_id,
+            context,
+            workspace_id=workspace_id,
+            limit=limit,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(result)
+
+
+@v44_bp.get("/directory/organizations/<organization_id>/retention")
+def get_enterprise_retention(organization_id: str):
+    _, denied = _authorized(organization_id, "organization.read")
+    if denied is not None:
+        return denied
+    return jsonify(get_retention_policy(organization_id))
+
+
+@v44_bp.put("/directory/organizations/<organization_id>/retention")
+def update_enterprise_retention(organization_id: str):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "retention policy must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "organization.manage")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        result = update_retention_policy(
+            organization_id,
+            payload,
+            context,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(result)
+
+
+@v44_bp.post("/directory/organizations/<organization_id>/retention/apply")
+def apply_enterprise_retention(organization_id: str):
+    context, denied = _authorized(organization_id, "organization.manage")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    try:
+        result = apply_retention(organization_id, context)
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    return jsonify(result)
+
+
+@v44_bp.post("/directory/organizations/<organization_id>/exports")
+def create_enterprise_export(organization_id: str):
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "export request must be a JSON object"}), 400
+    context, denied = _authorized(organization_id, "workspace.read")
+    if denied is not None:
+        return denied
+    if context is None:
+        return jsonify({"error": "enterprise tenant context required"}), 403
+    include_audit = payload.get("include_audit", False)
+    if not isinstance(include_audit, bool):
+        return jsonify({"error": "include_audit must be a boolean"}), 400
+    if include_audit:
+        _, audit_denied = _authorized(organization_id, "audit.read")
+        if audit_denied is not None:
+            return audit_denied
+    try:
+        bundle = export_workspace_data(
+            organization_id,
+            payload,
+            context,
+            include_audit=include_audit,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _enterprise_operation_error(exc)
+    response = jsonify(bundle)
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{organization_id}-{bundle["export_id"]}.json"'
+    )
+    return response
 
 
 @v44_bp.post("/public/decisions/ensemble")
