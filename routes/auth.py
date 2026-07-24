@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, session
 
 from security import authenticate, establish_session, json_body, limiter
 
@@ -25,12 +25,26 @@ def api_login():
     if not authenticate(username, password):
         return jsonify({"error": "invalid credentials", "code": "INVALID_CREDENTIALS"}), 401
     user = establish_session(username)
-    return jsonify({"ok": True, "user": user, "csrf_token": session["csrf_token"], "next": _safe_next(payload.get("next"))})
+    return jsonify(
+        {
+            "ok": True,
+            "user": user,
+            "csrf_token": session["csrf_token"],
+            "next": _safe_next(payload.get("next")),
+        }
+    )
 
 
 @auth_bp.route("/api/auth/session")
 def api_session():
-    return jsonify({"authenticated": True, "user": session["user"], "csrf_token": session["csrf_token"]})
+    return jsonify(
+        {
+            "authenticated": True,
+            "user": session["user"],
+            "csrf_token": session["csrf_token"],
+            "enterprise_tenant": session.get("enterprise_tenant"),
+        }
+    )
 
 
 @auth_bp.route("/api/auth/logout", methods=["POST"])

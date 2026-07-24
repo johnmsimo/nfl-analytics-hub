@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any
 
 VERSION = "4.4.0"
+RELEASE_VERSION = "4.4.1"
 MAX_TAGS = 20
 MAX_MEMBERSHIPS_PER_DECISION = 100
 MAX_ORGANIZATIONS = 1_000
@@ -467,9 +468,10 @@ def role_catalog() -> list[dict[str, Any]]:
 
 
 def enterprise_manifest() -> dict[str, Any]:
-    """Describe the v4.4.0 enterprise-access foundation and its boundaries."""
+    """Describe the current v4.4 enterprise-access capabilities and boundaries."""
     return {
-        "version": VERSION,
+        "version": RELEASE_VERSION,
+        "contract_version": VERSION,
         "name": "Enterprise Access",
         "features": {
             "deterministic_organization_identities": True,
@@ -479,9 +481,17 @@ def enterprise_manifest() -> dict[str, Any]:
             "organization_status_enforcement": True,
             "membership_status_enforcement": True,
             "contract_integrity_validation": True,
-            "persistent_tenant_directory": False,
+            "persistent_tenant_directory": True,
+            "tenant_aware_sessions": True,
+            "service_accounts": True,
+            "enterprise_route_tenant_enforcement": True,
             "runtime_tenant_enforcement": False,
-            "api_keys": False,
+            "api_keys": True,
+            "api_key_plaintext_storage": False,
+            "api_key_scopes": True,
+            "api_key_rotation": True,
+            "api_key_expiry": True,
+            "api_key_revocation": True,
             "quotas": False,
             "shared_workspaces": False,
             "public_decision_apis": False,
@@ -498,5 +508,5 @@ def enterprise_manifest() -> dict[str, Any]:
             "reference_organizations": MAX_ORGANIZATIONS,
             "reference_memberships": MAX_MEMBERSHIPS,
         },
-        "next_increment": "v4.4.1 Persistent Identity and API Keys",
+        "next_increment": "v4.4.2 Quotas and Public Decision APIs",
     }

@@ -18,13 +18,14 @@ def _organization_payload():
     }
 
 
-def test_capabilities_expose_v440_foundation_and_boundaries():
+def test_capabilities_preserve_v440_contracts_under_v441_release():
     response = _client().get("/api/v4.4/capabilities")
     body = response.get_json()
     assert response.status_code == 200
-    assert body["version"] == "4.4.0"
+    assert body["version"] == "4.4.1"
+    assert body["contract_version"] == "4.4.0"
     assert body["features"]["fixed_role_permission_catalog"] is True
-    assert body["features"]["api_keys"] is False
+    assert body["features"]["api_keys"] is True
     assert body["endpoints"]["access_authorize"].endswith("/access/authorize")
 
 
