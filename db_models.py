@@ -578,6 +578,180 @@ class EnterpriseApiKey(db.Model):
     )
 
 
+class EnterpriseWorkspace(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_workspaces"
+    workspace_id = db.Column(db.String(30), primary_key=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    slug = db.Column(db.String(64), nullable=False)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.String(1000))
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)
+    created_by_membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "organization_id",
+            "slug",
+            name="uq_enterprise_workspace_slug",
+        ),
+    )
+
+
+class EnterpriseWorkspaceCollaborator(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_workspace_collaborators"
+    collaborator_id = db.Column(db.String(33), primary_key=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id = db.Column(
+        db.String(30),
+        db.ForeignKey("enterprise_workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    access_level = db.Column(db.String(16), nullable=False, index=True)
+    granted_by_membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "workspace_id",
+            "membership_id",
+            name="uq_enterprise_workspace_collaborator",
+        ),
+    )
+
+
+class EnterpriseSavedDecision(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_saved_decisions"
+    decision_id = db.Column(db.String(29), primary_key=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id = db.Column(
+        db.String(30),
+        db.ForeignKey("enterprise_workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    operation = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    payload = db.Column(db.JSON)
+    payload_digest = db.Column(db.String(71), nullable=False)
+    tags = db.Column(db.JSON, nullable=False, default=list)
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)
+    created_by_membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    retained_until = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    expired_at = db.Column(db.DateTime(timezone=True))
+
+
+class EnterpriseReport(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_reports"
+    report_id = db.Column(db.String(27), primary_key=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id = db.Column(
+        db.String(30),
+        db.ForeignKey("enterprise_workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.JSON)
+    content_digest = db.Column(db.String(71), nullable=False)
+    decision_ids = db.Column(db.JSON, nullable=False, default=list)
+    status = db.Column(db.String(16), nullable=False, default="draft", index=True)
+    created_by_membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    retained_until = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    expired_at = db.Column(db.DateTime(timezone=True))
+
+
+class EnterpriseRetentionPolicy(TimestampMixin, db.Model):
+    __tablename__ = "enterprise_retention_policies"
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    decision_days = db.Column(db.Integer, nullable=False, default=365)
+    report_days = db.Column(db.Integer, nullable=False, default=365)
+    export_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    updated_by_membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+
+class EnterpriseAuditEvent(db.Model):
+    __tablename__ = "enterprise_audit_events"
+    sequence = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    event_id = db.Column(db.String(27), nullable=False, unique=True, index=True)
+    organization_id = db.Column(
+        db.String(24),
+        db.ForeignKey("enterprise_organizations.organization_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id = db.Column(
+        db.String(30),
+        db.ForeignKey("enterprise_workspaces.workspace_id", ondelete="SET NULL"),
+        index=True,
+    )
+    actor_membership_id = db.Column(
+        db.String(31),
+        db.ForeignKey("enterprise_memberships.membership_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    action = db.Column(db.String(100), nullable=False, index=True)
+    resource_type = db.Column(db.String(40), nullable=False, index=True)
+    resource_id = db.Column(db.String(80), nullable=False, index=True)
+    metadata_json = db.Column(db.JSON, nullable=False)
+    previous_digest = db.Column(db.String(71))
+    event_digest = db.Column(db.String(71), nullable=False, unique=True)
+    occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
 class InjuryReport(TimestampMixin, db.Model):
     __tablename__ = "injury_reports"
     id = db.Column(db.Integer, primary_key=True)

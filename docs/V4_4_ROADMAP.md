@@ -87,6 +87,34 @@ backward-compatible with the existing v3 and v4 contracts.
 - `POST /api/v4.4/public/decisions/scenario`
 - `POST /api/v4.4/public/decisions/brief`
 
+## v4.4.3 Shared workspaces and enterprise operations
+
+- SQL-backed tenant workspaces with deterministic organization-scoped identities
+- Workspace collaborator ACLs for viewer, editor, and manager access
+- Collaboration controls that only narrow current organization role permissions
+- Size-bounded saved decision payloads with immutable SHA-256 content evidence
+- Shared reports that reference only active decisions in the same workspace
+- Explicit organization-owned decision/report retention and export policy
+- Retention application that redacts expired content without hard-deleting auditable metadata
+- JSON enterprise exports limited to the caller's visible workspaces
+- Append-only, organization-serialized, hash-linked enterprise audit history
+- Audit-chain verification that surfaces stored event or metadata tampering
+- Authenticated `/enterprise-operations` administration workspace
+- Migration-managed workspace, collaboration, content, retention, and audit tables
+
+## v4.4.3 endpoints
+
+- `GET|POST /api/v4.4/directory/organizations/{organization_id}/workspaces`
+- `PATCH /api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}`
+- `GET|PUT /api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}/collaborators`
+- `DELETE /api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}/collaborators/{membership_id}`
+- `GET|POST /api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}/decisions`
+- `GET|POST /api/v4.4/directory/organizations/{organization_id}/workspaces/{workspace_id}/reports`
+- `GET /api/v4.4/directory/organizations/{organization_id}/audit`
+- `GET|PUT /api/v4.4/directory/organizations/{organization_id}/retention`
+- `POST /api/v4.4/directory/organizations/{organization_id}/retention/apply`
+- `POST /api/v4.4/directory/organizations/{organization_id}/exports`
+
 ## Guardrails
 
 - Existing v3.x and v4.0–v4.3 endpoint contracts remain unchanged.
@@ -120,11 +148,23 @@ backward-compatible with the existing v3 and v4 contracts.
   in-memory backend is development-only and does not claim distributed enforcement.
 - Existing `/api/v4` decision endpoints remain unchanged and are not silently placed behind the
   v4.4 enterprise quota boundary.
-- v4.4.2 does not add shared workspace persistence, enterprise audit history, administration
-  UI, exports, or retention controls.
+- Workspace access requires both a current organization permission and sufficient workspace ACL;
+  collaboration never expands a suspended, removed, or otherwise unauthorized membership.
+- Owner and administrator memberships can operate across their organization's workspaces;
+  analysts and viewers see only workspaces they created or were explicitly granted.
+- Archived workspaces are read-only and never silently reactivated by content operations.
+- Saved decision and report digests are revalidated on every read and export.
+- Reports cannot reference decisions from another tenant or workspace.
+- Enterprise audit history exposes no update or delete endpoint, serializes appends by organization,
+  and validates the complete hash chain before reporting it healthy.
+- Retention replaces expired payload/content with null while preserving identity, digest, actor,
+  timestamps, and audit history. It does not hard-delete enterprise records.
+- Exports are policy-controlled, limited to visible workspaces, retain redaction, and append an
+  audit event. Audit inclusion still requires `audit.read`.
+- Existing v3.x, v4.0-v4.3, and v4.4.2 public decision behavior remains unchanged.
 
-## Next increment
+## Completion
 
-v4.4.3 should add tenant-scoped saved decisions and reports, collaboration controls,
-append-only enterprise audit history, an administration workspace, and export/retention
-controls without weakening the v4.4.0-v4.4.2 identity, credential, and quota boundaries.
+v4.4.3 completes the planned **v4.4 Enterprise Access** series. Any subsequent release should
+be defined as a separate roadmap and must preserve the v4.4.0-v4.4.3 identity, credential,
+quota, collaboration, retention, and audit boundaries.

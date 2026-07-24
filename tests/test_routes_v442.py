@@ -91,7 +91,7 @@ def test_capabilities_expose_v442_quota_and_public_api_guarantees(
 ):
     client, _ = quota_client
     body = client.get("/api/v4.4/capabilities").get_json()
-    assert body["version"] == "4.4.2"
+    assert body["version"] == "4.4.3"
     assert body["contract_version"] == "4.4.0"
     assert body["features"]["redis_usage_accounting"] is True
     assert body["features"]["organization_quotas"] is True

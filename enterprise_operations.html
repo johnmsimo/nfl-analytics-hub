@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Enterprise Operations · NFL Analytics Hub</title>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/app.js" defer></script>
+  <style>
+    .ent-tabs{display:flex;gap:8px;overflow:auto;margin-bottom:16px}
+    .ent-tabs button{white-space:nowrap;border:1px solid var(--b);background:var(--card);color:var(--mu);padding:10px 14px;border-radius:10px;font-weight:800}
+    .ent-tabs button.on{color:var(--t);border-color:var(--b-strong);background:var(--card3)}
+    .ent-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+    .ent-kpi b{display:block;font-size:25px;margin-top:8px}
+    .ent-layout{display:grid;grid-template-columns:minmax(300px,410px) minmax(0,1fr);gap:16px}
+    .ent-form{display:grid;gap:11px;align-content:start}
+    .ent-form label{display:grid;gap:6px;color:var(--mu);font-size:12px;font-weight:800}
+    .ent-form input,.ent-form select,.ent-form textarea{width:100%;border:1px solid var(--b);background:var(--bg);color:var(--t);border-radius:9px;padding:10px;font:inherit}
+    .ent-form textarea{min-height:280px;resize:vertical;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .ent-output{min-height:500px;overflow:auto}
+    .ent-output pre{white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#bdd0ef}
+    .ent-note{padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.04);color:var(--mu);font-size:12px}
+    .ent-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:rgba(34,211,238,.14);color:#67e8f9;font-size:11px;font-weight:900}
+    .ent-context{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;color:var(--mu);font-size:12px}
+    .ent-context span{padding:5px 9px;border:1px solid var(--b);border-radius:999px}
+    @media(max-width:980px){.ent-grid{grid-template-columns:repeat(2,1fr)}.ent-layout{grid-template-columns:1fr}.ent-form textarea{min-height:220px}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <section class="ai-page">
+    <header class="ai-pagehead">
+      <div>
+        <h1>Enterprise Operations</h1>
+        <p>Tenant workspaces, shared decisions and reports, collaboration, audit, exports, and retention.</p>
+        <div class="ent-context" id="tenant-context"><span>Loading tenant…</span></div>
+      </div>
+      <span class="ent-badge">v4.4.3</span>
+    </header>
+    <section class="ent-grid" aria-label="Enterprise status">
+      <article class="ai-card ai-cardpad ent-kpi"><span class="muted">Workspaces</span><b id="kpi-workspaces">—</b></article>
+      <article class="ai-card ai-cardpad ent-kpi"><span class="muted">Role</span><b id="kpi-role">—</b></article>
+      <article class="ai-card ai-cardpad ent-kpi"><span class="muted">Audit chain</span><b id="kpi-audit">—</b></article>
+      <article class="ai-card ai-cardpad ent-kpi"><span class="muted">Export policy</span><b id="kpi-export">—</b></article>
+    </section>
+    <nav class="ent-tabs" id="ent-tabs" aria-label="Enterprise operations panels"></nav>
+    <div class="ent-layout">
+      <form class="ai-card ai-cardpad ent-form" id="ent-form">
+        <label>Action<select id="action"></select></label>
+        <label>Organization ID<input id="organization-id" autocomplete="off"></label>
+        <label>Workspace ID<input id="workspace-id" placeholder="Required for workspace content actions" autocomplete="off"></label>
+        <label>Request (JSON)<textarea id="ent-payload" spellcheck="false"></textarea></label>
+        <div class="ent-note" id="ent-note"></div>
+        <button class="btn primary" type="submit">Run controlled action</button>
+      </form>
+      <section class="ai-card ai-cardpad ent-output" aria-live="polite">
+        <h3 id="ent-output-title">Enterprise result</h3>
+        <div id="ent-output"><div class="ai-empty">Select an action to inspect tenant operations.</div></div>
+      </section>
+    </div>
+  </section>
+</main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+ const {$,esc,fetchJSON,shell,toast}=NFLHub;shell('enterprise');
+ const panels=['workspaces','collaboration','decisions','reports','audit','governance'];
+ const actions={
+  workspaces:{
+   'List workspaces':{method:'GET',path:o=>`/api/v4.4/directory/organizations/${o}/workspaces`},
+   'Create workspace':{method:'POST',path:o=>`/api/v4.4/directory/organizations/${o}/workspaces`,payload:{slug:'weekly-scouting',name:'Weekly Scouting',description:'Shared matchup decisions and reports.'}},
+   'Archive workspace':{method:'PATCH',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}`,payload:{status:'archived'}}
+  },
+  collaboration:{
+   'List collaborators':{method:'GET',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}/collaborators`},
+   'Set collaborator':{method:'PUT',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}/collaborators`,payload:{membership_id:'membership_REPLACE',access_level:'editor'}}
+  },
+  decisions:{
+   'List saved decisions':{method:'GET',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}/decisions`},
+   'Save decision':{method:'POST',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}/decisions`,payload:{operation:'decision.ensemble',title:'Week 1 matchup decision',tags:['week-1'],payload:{decision:'home',probability:.62,confidence:.81}}}
+  },
+  reports:{
+   'List reports':{method:'GET',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}/reports`},
+   'Save report':{method:'POST',workspace:true,path:(o,w)=>`/api/v4.4/directory/organizations/${o}/workspaces/${w}/reports`,payload:{title:'Week 1 decision brief',status:'draft',decision_ids:[],content:{summary:'Evidence-backed weekly decision brief.'}}}
+  },
+  audit:{
+   'Audit history':{method:'GET',path:o=>`/api/v4.4/directory/organizations/${o}/audit?limit=100`}
+  },
+  governance:{
+   'Retention policy':{method:'GET',path:o=>`/api/v4.4/directory/organizations/${o}/retention`},
+   'Update retention':{method:'PUT',path:o=>`/api/v4.4/directory/organizations/${o}/retention`,payload:{decision_days:365,report_days:365,export_enabled:true}},
+   'Apply retention':{method:'POST',path:o=>`/api/v4.4/directory/organizations/${o}/retention/apply`,payload:{}},
+   'Create JSON export':{method:'POST',path:o=>`/api/v4.4/directory/organizations/${o}/exports`,payload:{include_audit:true}}
+  }
+ };
+ const notes={
+  workspaces:'Workspaces are tenant-scoped. Archival is explicit and makes the workspace read-only.',
+  collaboration:'Workspace ACLs can only narrow existing organization permissions; inactive memberships never receive access.',
+  decisions:'Saved decision payloads are size-bounded, digested, retained explicitly, and written only by editors or managers.',
+  reports:'Reports may reference only active decisions in the same workspace and preserve their content digest after expiry.',
+  audit:'Every enterprise mutation and export appends a hash-linked event. Audit routes expose chain validation and no mutation endpoint.',
+  governance:'Retention redacts expired content without hard-deleting metadata. Exports preserve redaction and are recorded in audit history.'
+ };
+ let active='workspaces',tenant=null;
+ $('#ent-tabs').innerHTML=panels.map(id=>`<button type="button" data-id="${id}">${id[0].toUpperCase()+id.slice(1)}</button>`).join('');
+ $('#ent-tabs').onclick=e=>{const b=e.target.closest('[data-id]');if(b)activate(b.dataset.id)};
+ $('#action').onchange=fillAction;
+ $('#ent-form').onsubmit=run;
+ try{
+  const selected=await fetchJSON('/api/v4.4/session/tenant');
+  tenant=selected.tenant;
+  if(!selected.selected||!tenant)throw new Error('Select an enterprise tenant through the v4.4 tenant API first.');
+  $('#organization-id').value=tenant.organization_id;
+  $('#kpi-role').textContent=tenant.role;
+  $('#tenant-context').innerHTML=`<span>${esc(tenant.organization_id)}</span><span>${esc(tenant.subject.type)} · ${esc(tenant.subject.id)}</span><span>${esc(tenant.authentication)}</span>`;
+  await refresh();
+ }catch(err){$('#tenant-context').innerHTML=`<span>${esc(err.message)}</span>`}
+ activate(active);
+ function activate(id){
+  active=id;document.querySelectorAll('#ent-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.id===id));
+  $('#action').innerHTML=Object.keys(actions[id]).map(x=>`<option>${esc(x)}</option>`).join('');
+  $('#ent-note').textContent=notes[id];$('#ent-output-title').textContent=id[0].toUpperCase()+id.slice(1);
+  fillAction();
+ }
+ function fillAction(){
+  const item=actions[active][$('#action').value];
+  $('#ent-payload').value=item.payload?JSON.stringify(item.payload,null,2):'';
+  $('#ent-payload').disabled=!item.payload;
+  $('#workspace-id').disabled=!item.workspace;
+ }
+ async function run(e){
+  if(e)e.preventDefault();
+  const item=actions[active][$('#action').value],org=$('#organization-id').value.trim(),workspace=$('#workspace-id').value.trim();
+  if(!org){toast('Organization ID is required');return}
+  if(item.workspace&&!workspace){toast('Workspace ID is required');return}
+  let payload=null;
+  if(item.payload){try{payload=JSON.parse($('#ent-payload').value)}catch(err){toast('Request JSON is invalid');return}}
+  $('#ent-output').innerHTML='<div class="ai-empty">Loading…</div>';
+  try{
+   const opts=item.method==='GET'?{}:{method:item.method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)};
+   const result=await fetchJSON(item.path(org,workspace),opts);
+   $('#ent-output').innerHTML=`<pre>${esc(JSON.stringify(result,null,2))}</pre>`;
+   if(result.workspace?.workspace_id)$('#workspace-id').value=result.workspace.workspace_id;
+   await refresh();
+  }catch(err){$('#ent-output').innerHTML=`<div class="ai-empty">${esc(err.message)}</div>`}
+ }
+ async function refresh(){
+  if(!tenant)return;
+  const org=tenant.organization_id;
+  try{const w=await fetchJSON(`/api/v4.4/directory/organizations/${org}/workspaces`);$('#kpi-workspaces').textContent=w.workspaces.length}catch{$('#kpi-workspaces').textContent='!'}
+  try{const a=await fetchJSON(`/api/v4.4/directory/organizations/${org}/audit?limit=1`);$('#kpi-audit').textContent=a.chain_valid?'valid':'alert'}catch{$('#kpi-audit').textContent='restricted'}
+  try{const p=await fetchJSON(`/api/v4.4/directory/organizations/${org}/retention`);$('#kpi-export').textContent=p.export_enabled?'enabled':'disabled'}catch{$('#kpi-export').textContent='!'}
+ }
+});
+</script>
+</body>
+</html>

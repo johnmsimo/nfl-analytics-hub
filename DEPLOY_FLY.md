@@ -83,6 +83,12 @@ overrides through the v4.4 quota API. Confirm `REDIS_URL` is reachable before ex
 decision credentials; quota-protected endpoints return `503 QUOTA_BACKEND_UNAVAILABLE` instead
 of using process-local counters in production.
 
+v4.4.3 shared workspaces, decisions, reports, collaborator ACLs, retention policy, and enterprise
+audit history use PostgreSQL. The release migration creates those tables before new Machines
+start. Enterprise audit appends lock the owning organization row so each tenant receives one
+ordered hash chain across concurrent web processes. Retention redacts expired content but keeps
+its identity, digest, timestamps, and audit evidence; it never hard-deletes enterprise records.
+
 Every response includes `X-Request-ID`. Incoming `X-Request-ID` values are preserved, which allows Fly proxy logs, application logs, and client reports to be correlated. Outbound provider calls record host-level success, failure, latency, and last-error telemetry in-process.
 
 ## 6. Deploy manually once
@@ -121,6 +127,12 @@ Also verify:
 - A scoped v4.4 API key can call a public decision endpoint with an `Idempotency-Key`.
 - Repeating that exact request reports an idempotent replay without increasing usage.
 - Quota responses include organization/credential remaining counts and a reset time.
+- `/enterprise-operations` loads the selected tenant and lists its visible workspaces.
+- A saved decision and report can be created, read, and exported from one workspace.
+- A collaborator with viewer access cannot write until explicitly advanced to editor.
+- `/api/v4.4/directory/organizations/{organization_id}/audit` reports `chain_valid: true`.
+- A retention dry run is not implied: invoking `/retention/apply` performs explicit content
+  redaction for records whose `retained_until` has elapsed.
 - Responses include `X-Request-ID`.
 - Structured request logs contain status and duration fields.
 - No optional provider secret appears in logs.
