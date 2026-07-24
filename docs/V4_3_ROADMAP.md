@@ -38,6 +38,18 @@ rules established by earlier releases.
 - `POST /api/v4.3/models/rollouts/plans/normalize`
 - `POST /api/v4.3/models/rollouts/steps/evaluate`
 
+## v4.3.3 endpoints
+
+- `GET /api/v4.3/operations/workspace`
+- `GET /api/v4.3/operations/status`
+- `GET|POST /api/v4.3/operations/registry/versions`
+- `GET /api/v4.3/operations/registry/versions/<model_version_id>`
+- `POST /api/v4.3/operations/registry/versions/<model_version_id>/transitions`
+- `GET|POST /api/v4.3/operations/approvals`
+- `POST /api/v4.3/operations/approvals/<approval_id>/decisions`
+- `POST /api/v4.3/operations/health/observations`
+- `GET /api/v4.3/operations/audit`
+
 ## v4.3.0 Registry foundation
 
 - Deterministic model and model-version identities derived from caller-supplied keys
@@ -82,6 +94,21 @@ rules established by earlier releases.
 - Advance, hold, complete, and rollback decisions without automatic traffic mutation
 - Explicit rollback targets pinned to the prior champion artifact and feature schema
 
+## v4.3.3 Lifecycle operations
+
+- Redis-backed persistent registry with a thread-safe in-memory development adapter
+- Conflict-safe registration and optimistic-lock protected lifecycle transitions
+- Append-only, payload-bounded audit events for registry, approval, transition, and health writes
+- Four-eyes approvals requiring a distinct requester and approver
+- Approvals bound to one action, model or rollout resource, destination status, evidence digest,
+  and expiry
+- Approval enforcement for champion, retired, and archived lifecycle transitions
+- Caller-supplied lifecycle health observations with deterministic breach and staleness alerts
+- Operations snapshots covering registry states, pending approvals, unhealthy models, alerts, and
+  audit depth
+- Responsive `/model-operations` workspace for registry, approvals, health, and audit review
+- Configured Redis failures remain visible; process-local memory storage is development-only
+
 ## Guardrails
 
 - Existing v3.x, v4.0, v4.1, and v4.2 contracts remain unchanged.
@@ -108,10 +135,19 @@ rules established by earlier releases.
   does not claim that an external trainer produced an artifact.
 - Shadow and canary advancement requires caller-supplied, fresh, sample-qualified health evidence.
 - Rollback decisions always name the prior champion model version, artifact, and feature schema.
-- Durable registry storage, external trainer execution, deployment adapters, and operator
-  approvals remain v4.3.3 concerns.
+- External trainer execution and deployment adapters remain explicit concerns rather than
+  implicit side effects.
+- Controlled lifecycle transitions require an approved, unexpired four-eyes decision bound to the
+  exact target status and evidence digest.
+- Operational mutations append a bounded audit event; model payloads and artifact bytes are not
+  copied into audit details.
+- Lifecycle health and alerts use caller-supplied observations and evidence only.
+- Configured Redis failures are never hidden by an in-memory fallback.
+- The operator workspace cannot train a model, mutate serving traffic, deploy an artifact, or
+  execute an external rollback automatically.
 
-## Next increment
+## Completion boundary
 
-v4.3.3 should add persistent registry adapters, audit history, lifecycle health and alerts,
-operator approvals, and a model operations workspace.
+v4.3.3 completes the planned Model Lifecycle and Governance series. Define the next version from
+deployed operational evidence, keeping any external trainer or deployment adapter behind a new
+versioned contract.

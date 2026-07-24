@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Model Operations · NFL Analytics Hub</title>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/app.js" defer></script>
+  <style>
+    .ops-tabs{display:flex;gap:8px;overflow:auto;margin-bottom:16px}
+    .ops-tabs button{white-space:nowrap;border:1px solid var(--b);background:var(--card);color:var(--mu);padding:10px 14px;border-radius:10px;font-weight:800}
+    .ops-tabs button.on{color:var(--t);border-color:var(--b-strong);background:var(--card3)}
+    .ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+    .ops-kpi b{display:block;font-size:25px;margin-top:8px}
+    .ops-layout{display:grid;grid-template-columns:minmax(290px,390px) minmax(0,1fr);gap:16px}
+    .ops-form{display:grid;gap:11px;align-content:start}
+    .ops-form label{display:grid;gap:6px;color:var(--mu);font-size:12px;font-weight:800}
+    .ops-form input,.ops-form select,.ops-form textarea{width:100%;border:1px solid var(--b);background:var(--bg);color:var(--t);border-radius:9px;padding:10px;font:inherit}
+    .ops-form textarea{min-height:280px;resize:vertical;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .ops-output{min-height:460px;overflow:auto}
+    .ops-output pre{white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#bdd0ef}
+    .ops-note{padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.04);color:var(--mu);font-size:12px}
+    .ops-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:rgba(139,92,246,.16);color:#c3b3ff;font-size:11px;font-weight:900}
+    @media(max-width:980px){.ops-grid{grid-template-columns:repeat(2,1fr)}.ops-layout{grid-template-columns:1fr}.ops-form textarea{min-height:220px}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <section class="ai-page">
+    <header class="ai-pagehead">
+      <div>
+        <h1>Model Operations</h1>
+        <p>Persistent registry, evidence-bound approvals, lifecycle health, alerts, and audit history.</p>
+      </div>
+      <span class="ops-badge">v4.3.3</span>
+    </header>
+    <section class="ops-grid" aria-label="Lifecycle status">
+      <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Registry</span><b id="kpi-models">—</b></article>
+      <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Pending approvals</span><b id="kpi-approvals">—</b></article>
+      <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Unhealthy models</span><b id="kpi-unhealthy">—</b></article>
+      <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Audit events</span><b id="kpi-audit">—</b></article>
+    </section>
+    <nav class="ops-tabs" id="ops-tabs" aria-label="Model operations panels"></nav>
+    <div class="ops-layout">
+      <form class="ai-card ai-cardpad ops-form" id="ops-form">
+        <label id="action-label">Action<select id="action"></select></label>
+        <label>Request (JSON)<textarea id="ops-payload" spellcheck="false"></textarea></label>
+        <div class="ops-note" id="ops-note"></div>
+        <button class="btn primary" type="submit">Submit controlled action</button>
+      </form>
+      <section class="ai-card ai-cardpad ops-output" aria-live="polite">
+        <h3 id="ops-output-title">Operations result</h3>
+        <div id="ops-output"><div class="ai-empty">Choose a panel to inspect lifecycle state.</div></div>
+      </section>
+    </div>
+  </section>
+</main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+ const {$,esc,fetchJSON,shell,toast}=NFLHub;shell('models');
+ const panels=['registry','approvals','health','audit'];
+ const examples={
+  registry:{actions:{
+   'List versions':{method:'GET',endpoint:'/api/v4.3/operations/registry/versions',payload:null},
+   'Register version':{method:'POST',endpoint:'/api/v4.3/operations/registry/versions',payload:{model_key:'game-win-probability',version:'v1',target:'home-win',algorithm:'calibrated-ensemble',feature_schema:[],registered_at:0,actor:'operator'}}
+  },note:'Registration is conflict-safe. Reusing a model key and version with different metadata fails visibly.'},
+  approvals:{actions:{
+   'List pending':{method:'GET',endpoint:'/api/v4.3/operations/approvals?status=pending',payload:null},
+   'Request approval':{method:'POST',endpoint:'/api/v4.3/operations/approvals',payload:{action:'model.lifecycle.transition',target_status:'champion',resource_id:'mv_REPLACE',evidence_digest:'sha256:REPLACE',reason:'controlled lifecycle change',requested_at:0,expires_at:3600,actor:'requester'}},
+   'Decide approval':{method:'POST',endpoint:'/api/v4.3/operations/approvals/APPROVAL_ID/decisions',payload:{decision:'approved',reason:'evidence reviewed',decided_at:1,actor:'approver'}}
+  },note:'Four-eyes control is enforced: the approver must differ from the requester, and approval binds to exact evidence.'},
+  health:{actions:{
+   'Operations status':{method:'GET',endpoint:'/api/v4.3/operations/status',payload:null},
+   'Record observation':{method:'POST',endpoint:'/api/v4.3/operations/health/observations',payload:{model_version_id:'mv_REPLACE',observed_at:100,actor:'operator',checks:[{name:'prediction-quality',healthy:true,severity:'critical',observed_at:100,maximum_age_seconds:900,evidence_digest:'sha256:REPLACE',detail:'held-out quality within policy'}]}}
+  },note:'Health checks and alerts are derived only from the evidence and timestamps supplied in the request.'},
+  audit:{actions:{
+   'Recent events':{method:'GET',endpoint:'/api/v4.3/operations/audit?limit=100',payload:null}
+  },note:'Audit history is append-only and payload-bounded. It records mutations, actors, evidence references, and sequence.'}
+ };
+ let active='registry';
+ $('#ops-tabs').innerHTML=panels.map(id=>`<button type="button" data-id="${id}">${id[0].toUpperCase()+id.slice(1)}</button>`).join('');
+ $('#ops-tabs').onclick=e=>{const b=e.target.closest('[data-id]');if(b)activate(b.dataset.id)};
+ $('#action').onchange=fillAction;
+ $('#ops-form').onsubmit=run;
+ await refreshStatus();activate(active);
+ function activate(id){
+  active=id;document.querySelectorAll('#ops-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.id===id));
+  $('#action').innerHTML=Object.keys(examples[id].actions).map(x=>`<option>${esc(x)}</option>`).join('');
+  $('#ops-note').textContent=examples[id].note;$('#ops-output-title').textContent=id[0].toUpperCase()+id.slice(1);
+  fillAction();run();
+ }
+ function fillAction(){
+  const item=examples[active].actions[$('#action').value];
+  $('#ops-payload').value=item.payload?JSON.stringify(item.payload,null,2):'';
+  $('#ops-payload').disabled=!item.payload;
+ }
+ async function run(e){
+  if(e)e.preventDefault();
+  const item=examples[active].actions[$('#action').value];let payload=null;
+  if(item.payload){try{payload=JSON.parse($('#ops-payload').value)}catch(err){toast('Request JSON is invalid');return}}
+  $('#ops-output').innerHTML='<div class="ai-empty">Loading…</div>';
+  try{
+   const opts=item.method==='GET'?{}:{method:item.method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)};
+   const result=await fetchJSON(item.endpoint,opts);
+   $('#ops-output').innerHTML=`<pre>${esc(JSON.stringify(result,null,2))}</pre>`;
+   await refreshStatus();
+  }catch(err){$('#ops-output').innerHTML=`<div class="ai-empty">${esc(err.message)}</div>`}
+ }
+ async function refreshStatus(){
+  try{
+   const s=await fetchJSON('/api/v4.3/operations/status');
+   $('#kpi-models').textContent=s.registry.total;$('#kpi-approvals').textContent=s.approvals.pending;
+   $('#kpi-unhealthy').textContent=s.health.unhealthy_models;$('#kpi-audit').textContent=s.audit_events;
+  }catch(err){['#kpi-models','#kpi-approvals','#kpi-unhealthy','#kpi-audit'].forEach(id=>$(id).textContent='!')}
+ }
+});
+</script>
+</body>
+</html>
