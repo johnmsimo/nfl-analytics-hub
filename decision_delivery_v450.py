@@ -26,6 +26,7 @@ MAX_PAYLOAD_BYTES = 128 * 1024
 MAX_EVENT_TYPE_LENGTH = 80
 MAX_DESTINATION_LENGTH = 2048
 MAX_LIST_LIMIT = 100
+DISPATCH_VERSION = "4.5.1"
 
 
 class DeliveryConflictError(ValueError):
@@ -37,9 +38,9 @@ def _canonical(value: Any) -> str:
 
 
 def request_digest(event_type: str, destination: str, payload: Any) -> str:
-    body = _canonical(
-        {"event_type": event_type, "destination": destination, "payload": payload}
-    ).encode("utf-8")
+    body = _canonical({"event_type": event_type, "destination": destination, "payload": payload}).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(body).hexdigest()
 
 
@@ -57,9 +58,7 @@ def _ttl() -> int:
     except ValueError as exc:
         raise RuntimeError("V45_DELIVERY_TTL_SECONDS must be an integer") from exc
     if not 3600 <= value <= MAX_TTL_SECONDS:
-        raise RuntimeError(
-            f"V45_DELIVERY_TTL_SECONDS must be between 3600 and {MAX_TTL_SECONDS}"
-        )
+        raise RuntimeError(f"V45_DELIVERY_TTL_SECONDS must be between 3600 and {MAX_TTL_SECONDS}")
     return value
 
 
@@ -232,9 +231,7 @@ class RedisDeliveryBackend:
         if existing:
             reference = json.loads(existing)
             if reference["payload_digest"] != digest:
-                raise DeliveryConflictError(
-                    "Idempotency-Key was already used for different delivery content"
-                )
+                raise DeliveryConflictError("Idempotency-Key was already used for different delivery content")
             stored = self.get(organization_id, reference["delivery_id"])
             if stored is not None:
                 stored["replayed"] = True
@@ -304,13 +301,9 @@ class RedisDeliveryBackend:
     def list(self, organization_id: str, limit: int = 50) -> list[dict[str, Any]]:
         if not 1 <= limit <= MAX_LIST_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
-        ids = self.client.zrevrange(
-            f"{self.key_prefix}:index:{organization_id}", 0, limit - 1
-        )
+        ids = self.client.zrevrange(f"{self.key_prefix}:index:{organization_id}", 0, limit - 1)
         return [
-            result
-            for delivery_id in ids
-            if (result := self.get(organization_id, delivery_id)) is not None
+            result for delivery_id in ids if (result := self.get(organization_id, delivery_id)) is not None
         ]
 
 
@@ -344,10 +337,13 @@ def get_delivery_backend() -> InMemoryDeliveryBackend | RedisDeliveryBackend:
 
 def delivery_manifest() -> dict[str, Any]:
     return {
-        "version": VERSION,
+        "version": DISPATCH_VERSION,
+        "intake_version": VERSION,
         "status_values": ["queued", "dispatching", "delivered", "retrying", "failed", "dead_letter"],
         "intake_status": "queued",
-        "outbound_delivery_enabled": False,
+        "outbound_delivery_enabled": True,
+        "signed_dispatch_worker": True,
+        "dispatch_statuses": ["queued", "dispatching", "delivered", "retrying", "failed"],
         "idempotency_ttl_seconds": _ttl(),
         "max_payload_bytes": MAX_PAYLOAD_BYTES,
         "production_backend": "redis",

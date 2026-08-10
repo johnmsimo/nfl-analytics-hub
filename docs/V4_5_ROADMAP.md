@@ -38,6 +38,22 @@ audit guarantees while separating job intake from outbound network delivery.
   outbound network delivery has occurred; dispatch is the next increment.
 - Existing v3.x, v4.0–v4.3, and v4.4 routes remain unchanged.
 
+## v4.5.1 contract
+
+- The Fly `delivery` process consumes the existing Redis stream through a
+  consumer group and claims stale pending messages after restart.
+- Outbound requests use canonical JSON, HTTPS-only destinations, and an
+  HMAC-SHA256 signature over `timestamp.canonical_payload` in
+  `X-NFL-Delivery-Signature`.
+- `V45_DELIVERY_SIGNING_SECRET` is required in production and is never stored
+  in a queue record, payload, response, or log.
+- HTTP 408, 425, 429, and 5xx responses plus transport timeouts are retried
+  with bounded exponential backoff. Other non-2xx responses fail immediately.
+- Delivery attempts are bounded; terminal records are `delivered` or
+  `failed`, and every attempt updates the existing status endpoint.
+- The web process remains non-blocking. Dead-letter inspection, replay
+  controls, and delivery metrics remain v4.5.2 scope.
+
 ## Guardrails
 
 - API keys are accepted on `/api/v4.5` only for this new contract and remain

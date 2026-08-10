@@ -1,4 +1,4 @@
-"""NFL Analytics Hub v4.5.0 decision delivery intake endpoints."""
+"""NFL Analytics Hub v4.5 decision delivery intake endpoints."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from flask import Blueprint, g, jsonify, request
 
 from decision_delivery_v450 import DeliveryConflictError, delivery_manifest, get_delivery_backend
 from enterprise_identity_v441 import authorize_context
+
+API_VERSION = "4.5.1"
 
 v45_bp = Blueprint("v45_api", __name__, url_prefix="/api/v4.5")
 
@@ -38,13 +40,14 @@ def _payload() -> dict[str, Any] | None:
 def capabilities():
     return jsonify(
         {
-            "version": "4.5.0",
-            "contract_version": "4.5.0",
+            "version": API_VERSION,
+            "contract_version": API_VERSION,
             "features": {
                 "redis_delivery_intake": True,
                 "idempotent_delivery_jobs": True,
                 "delivery_status_inspection": True,
-                "outbound_delivery": False,
+                "outbound_delivery": True,
+                "signed_dispatch_worker": True,
             },
             "delivery_contract": delivery_manifest(),
             "endpoints": {
@@ -67,7 +70,9 @@ def enqueue_delivery():
         return jsonify({"error": "delivery request must be a JSON object"}), 400
     idempotency_key = request.headers.get("Idempotency-Key")
     if not idempotency_key:
-        return jsonify({"error": "Idempotency-Key header is required", "code": "MISSING_IDEMPOTENCY_KEY"}), 400
+        return jsonify(
+            {"error": "Idempotency-Key header is required", "code": "MISSING_IDEMPOTENCY_KEY"}
+        ), 400
     try:
         result = get_delivery_backend().enqueue(
             context["organization_id"],
@@ -98,7 +103,7 @@ def list_deliveries():
         return jsonify({"error": str(exc), "code": "DELIVERY_BACKEND_UNAVAILABLE", "retryable": True}), 503
     except ValueError as exc:
         return jsonify({"error": str(exc), "code": "INVALID_LIMIT"}), 400
-    return jsonify({"version": "4.5.0", "deliveries": result})
+    return jsonify({"version": API_VERSION, "deliveries": result})
 
 
 @v45_bp.get("/deliveries/<delivery_id>")

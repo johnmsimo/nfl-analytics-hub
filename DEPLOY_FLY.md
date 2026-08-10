@@ -86,7 +86,22 @@ of using process-local counters in production.
 
 v4.5.0 delivery intake also uses the configured Redis instance for idempotent
 queued jobs and status inspection. It returns `202` for queue acceptance;
-outbound network dispatch is intentionally deferred to the v4.5.1 worker.
+v4.5.1 adds a separate `delivery` process group for outbound dispatch. Set a
+stable signing secret independently from `SECRET_KEY`:
+
+```bash
+fly secrets set \\
+  -a nfl-analytics-hub \\
+  V45_DELIVERY_SIGNING_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+```
+
+The worker consumes the Redis stream, sends canonical JSON over HTTPS with
+`X-NFL-Delivery-Signature`, retries only transient failures with bounded
+exponential backoff, and records delivery outcomes in the existing status
+record. Configure `V45_DELIVERY_MAX_ATTEMPTS`,
+`V45_DELIVERY_BACKOFF_SECONDS`, and `V45_DELIVERY_TIMEOUT_SECONDS` only when
+the defaults need to change. The signing secret must remain stable for
+receivers that verify signatures and must never appear in logs or payloads.
 
 v4.4.3 shared workspaces, decisions, reports, collaborator ACLs, retention policy, and enterprise
 audit history use PostgreSQL. The release migration creates those tables before new Machines
@@ -147,6 +162,7 @@ Also verify:
 
 - `web`: Gunicorn application on port 8080.
 - `worker`: APScheduler ingestion and analytics service.
+- `delivery`: Redis stream consumer for v4.5.1 outbound delivery.
 - `release_command`: Alembic/Flask-Migrate database upgrade.
 
 The web process does not start the scheduler, preventing duplicate scheduled jobs. Production web and worker startup never calls `db.create_all()`; schema changes must be represented by Alembic migrations.
