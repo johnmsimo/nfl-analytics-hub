@@ -71,7 +71,7 @@ HTTP_RETRY_BACKOFF_SEC=0.5
 HTTP_USER_AGENT=nfl-analytics-hub/3.0
 V44_ORGANIZATION_QUOTA=1000
 V44_CREDENTIAL_QUOTA=100
-V44_QUOTA_WINDOW_SECONDS=60
+V44_QUOTA_WINDOW_SECONDS=60\nV45_DELIVERY_TTL_SECONDS=604800
 ```
 
 `API_KEY_PEPPER` must remain stable while v4.4.1 API credentials are active. The application
@@ -83,7 +83,7 @@ overrides through the v4.4 quota API. Confirm `REDIS_URL` is reachable before ex
 decision credentials; quota-protected endpoints return `503 QUOTA_BACKEND_UNAVAILABLE` instead
 of using process-local counters in production.
 
-v4.4.3 shared workspaces, decisions, reports, collaborator ACLs, retention policy, and enterprise
+v4.5.0 delivery intake also uses the configured Redis instance for idempotent\nqueued jobs and status inspection. It returns `202` for queue acceptance;\noutbound network dispatch is intentionally deferred to the v4.5.1 worker.\n\nv4.4.3 shared workspaces, decisions, reports, collaborator ACLs, retention policy, and enterprise
 audit history use PostgreSQL. The release migration creates those tables before new Machines
 start. Enterprise audit appends lock the owning organization row so each tenant receives one
 ordered hash chain across concurrent web processes. Retention redacts expired content but keeps
