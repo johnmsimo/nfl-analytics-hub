@@ -41,6 +41,10 @@ staking, and closing-line capture.
 | `DATA_DIR` / `NFL_DATA_DIR` | `./data` | Persistent state (Fly volume mounts here) |
 | `REDIS_URL` | — | Optional; in-memory fallback otherwise |
 | `V45_DELIVERY_TTL_SECONDS` | `604800` | v4.5 queued delivery record/idempotency retention |
+| `V45_DELIVERY_SIGNING_SECRET` | — | Secret used by the v4.5.1 dispatch worker to sign payloads |
+| `V45_DELIVERY_MAX_ATTEMPTS` | `5` | Maximum outbound attempts per delivery |
+| `V45_DELIVERY_BACKOFF_SECONDS` | `5` | Initial retry backoff; exponential and bounded |
+| `V45_DELIVERY_TIMEOUT_SECONDS` | `10` | Per-destination HTTPS timeout |
 | `PORT` | `10000` dev / `8080` Fly | Bind port |
 
 A `.env` in the repo root is auto-loaded at boot.
@@ -253,3 +257,9 @@ This repository is ready for a private GitHub repository and Fly.io deployment.
 - Deployment guide: `DEPLOY_FLY.md`
 
 The deployed architecture uses separate `web` and `worker` process groups. PostgreSQL and Redis connection strings must be configured as Fly secrets.
+
+v4.5.1 adds a separate `delivery` process group. It consumes queued delivery
+jobs from Redis, signs the canonical JSON payload with
+`V45_DELIVERY_SIGNING_SECRET`, retries transient failures with bounded
+exponential backoff, and records `delivered`, `retrying`, or `failed` status.
+The secret must never be placed in a delivery payload or logged.

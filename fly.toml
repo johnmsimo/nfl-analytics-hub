@@ -26,6 +26,7 @@ primary_region = 'ewr'
 [processes]
   web = 'gunicorn app:app -c gunicorn_conf.py'
   worker = "sh -c 'ENABLE_SCHEDULER=true python scheduler_service.py'"
+  delivery = 'python delivery_worker.py'
 
 [[mounts]]
   source = 'nfl_data'
@@ -65,3 +66,10 @@ primary_region = 'ewr'
   cpus = 1
   memory_mb = 1024
   processes = ['worker']
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 512
+  processes = ['delivery']
