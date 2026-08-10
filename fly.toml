@@ -20,7 +20,7 @@ primary_region = 'ewr'
   ENABLE_EXTERNAL_SYNC = 'false'
   ENABLE_SCHEDULER = 'false'
   PORT = '8080'
-  WEATHER_PROVIDER = 'nws'
+  WEATHER_PROVIDER = 'nws'\n  V45_DELIVERY_TTL_SECONDS = '604800'
 
 [processes]
   web = 'gunicorn app:app -c gunicorn_conf.py'
