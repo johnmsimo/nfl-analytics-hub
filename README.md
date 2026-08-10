@@ -39,7 +39,8 @@ staking, and closing-line capture.
 | `TRACKER_CLOSING_LEAD_MIN` / `TRACKER_CLOSING_GRACE_MIN` | `20` / `15` | Capture window around kickoff |
 | `TRACKER_AUTO_SYNC_MINUTES` | `30` | Auto-grading interval |
 | `DATA_DIR` / `NFL_DATA_DIR` | `./data` | Persistent state (Fly volume mounts here) |
-| `REDIS_URL` | — | Optional; in-memory fallback otherwise |\n| `V45_DELIVERY_TTL_SECONDS` | `604800` | v4.5 queued delivery record/idempotency retention |
+| `REDIS_URL` | — | Optional; in-memory fallback otherwise |
+| `V45_DELIVERY_TTL_SECONDS` | `604800` | v4.5 queued delivery record/idempotency retention |
 | `PORT` | `10000` dev / `8080` Fly | Bind port |
 
 A `.env` in the repo root is auto-loaded at boot.
