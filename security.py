@@ -80,7 +80,10 @@ def configure_security(app) -> None:
         g.enterprise_api_key = None
         supplied_api_key = request.headers.get("X-API-Key")
         if supplied_api_key:
-            if not (\n                request.path.startswith("/api/v4.4/")\n                or request.path.startswith("/api/v4.5/")\n            ):
+            if not (
+                request.path.startswith("/api/v4.4/")
+                or request.path.startswith("/api/v4.5/")
+            ):
                 return (
                     jsonify(
                         {
