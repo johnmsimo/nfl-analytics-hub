@@ -258,6 +258,7 @@ from routes.tracker_routes import tracker_bp  # noqa: E402
 from routes.v2_api import v2_bp  # noqa: E402
 from routes.v32_api import v32_bp  # noqa: E402
 from routes.v32_release_api import v32_release_bp  # noqa: E402
+from routes.v45_api import v45_bp  # noqa: E402
 
 app.register_blueprint(games_bp)
 app.register_blueprint(props_bp)
@@ -275,6 +276,7 @@ app.register_blueprint(feeds_bp)
 app.register_blueprint(analytics_api_bp)
 app.register_blueprint(v32_bp)
 app.register_blueprint(v32_release_bp)
+app.register_blueprint(v45_bp)
 
 _preload_started = False
 
