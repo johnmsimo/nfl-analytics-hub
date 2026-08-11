@@ -122,7 +122,8 @@ def test_retry_stream_fields_accept_compact_delivery_id():
 
 def test_capabilities_advertise_v451_dispatch_contract():
     manifest = delivery_manifest()
-    assert manifest["version"] == "4.5.1"
+    assert manifest["version"] == "4.5.2"
+    assert manifest["operations_version"] == "4.5.2"
     assert manifest["intake_version"] == "4.5.0"
     assert manifest["outbound_delivery_enabled"] is True
     assert manifest["signed_dispatch_worker"] is True
