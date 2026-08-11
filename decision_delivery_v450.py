@@ -37,10 +37,20 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
-def request_digest(event_type: str, destination: str, payload: Any) -> str:
-    body = _canonical({"event_type": event_type, "destination": destination, "payload": payload}).encode(
-        "utf-8"
-    )
+def request_digest(
+    event_type: str,
+    destination: str,
+    payload: Any,
+    workspace_id: str | None = None,
+) -> str:
+    body = _canonical(
+        {
+            "event_type": event_type,
+            "destination": destination,
+            "payload": payload,
+            "workspace_id": workspace_id,
+        }
+    ).encode("utf-8")
     return "sha256:" + hashlib.sha256(body).hexdigest()
 
 
@@ -102,12 +112,14 @@ def _record(
     payload: Any,
     digest: str,
     created_at: float,
+    workspace_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "version": VERSION,
         "delivery_id": delivery_id,
         "organization_id": organization_id,
         "api_key_id": api_key_id,
+        "workspace_id": workspace_id,
         "idempotency_key": idempotency_key,
         "event_type": event_type,
         "destination": destination,
@@ -141,12 +153,13 @@ class InMemoryDeliveryBackend:
         payload: Any,
         *,
         now: Any = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         event, target, body, _ = validate_request(event_type, destination, payload)
         request_id = str(idempotency_key or "").strip()
         if not request_id or len(request_id) > 200:
             raise ValueError("Idempotency-Key must contain 1-200 characters")
-        digest = request_digest(event, target, body)
+        digest = request_digest(event, target, body, workspace_id)
         timestamp = _timestamp(now)
         with self._lock:
             existing = self._idempotency.get((organization_id, request_id))
@@ -167,6 +180,7 @@ class InMemoryDeliveryBackend:
                 payload=body,
                 digest=digest,
                 created_at=timestamp,
+                workspace_id=workspace_id,
             )
             self._records[delivery_id] = result
             self._idempotency[(organization_id, request_id)] = (
@@ -220,12 +234,13 @@ class RedisDeliveryBackend:
         payload: Any,
         *,
         now: Any = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         event, target, body, _ = validate_request(event_type, destination, payload)
         request_id = str(idempotency_key or "").strip()
         if not request_id or len(request_id) > 200:
             raise ValueError("Idempotency-Key must contain 1-200 characters")
-        digest = request_digest(event, target, body)
+        digest = request_digest(event, target, body, workspace_id)
         idem_key = self._idempotency_key(organization_id, request_id)
         existing = self.client.get(idem_key)
         if existing:
@@ -248,6 +263,7 @@ class RedisDeliveryBackend:
             payload=body,
             digest=digest,
             created_at=timestamp,
+            workspace_id=workspace_id,
         )
         status_key = self._status_key(delivery_id)
         reference = {"delivery_id": delivery_id, "payload_digest": digest}
@@ -337,13 +353,15 @@ def get_delivery_backend() -> InMemoryDeliveryBackend | RedisDeliveryBackend:
 
 def delivery_manifest() -> dict[str, Any]:
     return {
-        "version": DISPATCH_VERSION,
+        "version": "4.5.2",
         "intake_version": VERSION,
+        "dispatch_version": DISPATCH_VERSION,
+        "operations_version": "4.5.2",
         "status_values": ["queued", "dispatching", "delivered", "retrying", "failed", "dead_letter"],
         "intake_status": "queued",
         "outbound_delivery_enabled": True,
         "signed_dispatch_worker": True,
-        "dispatch_statuses": ["queued", "dispatching", "delivered", "retrying", "failed"],
+        "dispatch_statuses": ["queued", "dispatching", "delivered", "retrying", "failed", "dead_letter"],
         "idempotency_ttl_seconds": _ttl(),
         "max_payload_bytes": MAX_PAYLOAD_BYTES,
         "production_backend": "redis",

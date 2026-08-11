@@ -1,4 +1,4 @@
-"""Redis-backed v4.5.1 delivery dispatcher.
+"""Redis-backed v4.5.2 delivery dispatcher.
 
 The web process only accepts and queues delivery jobs. This module is the
 separate process that consumes those jobs, signs the canonical JSON payload,
@@ -152,7 +152,7 @@ class DeliveryWorker:
         timestamp = str(int(self.clock()))
         return {
             "Content-Type": "application/json",
-            "User-Agent": "nfl-analytics-hub-v4.5.1",
+            "User-Agent": "nfl-analytics-hub-v4.5.2",
             "X-NFL-Delivery-ID": str(record["delivery_id"]),
             "X-NFL-Event-Type": str(record["event_type"]),
             "X-NFL-Delivery-Timestamp": timestamp,

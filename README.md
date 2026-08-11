@@ -263,3 +263,18 @@ jobs from Redis, signs the canonical JSON payload with
 `V45_DELIVERY_SIGNING_SECRET`, retries transient failures with bounded
 exponential backoff, and records `delivered`, `retrying`, or `failed` status.
 The secret must never be placed in a delivery payload or logged.
+
+
+## Version 4.5.2 — Delivery operations
+
+v4.5.2 adds organization- and workspace-scoped delivery operations:
+
+- Dead-letter inspection for exhausted or legacy failed deliveries
+- Replay controls that preserve delivery identity and reset bounded attempts
+- Delivery status metrics with tenant/workspace filtering
+- Replay audit events appended to the existing enterprise hash chain
+
+New endpoints are GET /api/v4.5/deliveries/dead-letters, GET
+/api/v4.5/deliveries/metrics, and POST
+/api/v4.5/deliveries/{delivery_id}/replay. Redis remains required for
+production delivery operations.

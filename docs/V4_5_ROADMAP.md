@@ -62,3 +62,22 @@ audit guarantees while separating job intake from outbound network delivery.
   distributed production enforcement.
 - Queue records expire after a bounded retention window and contain no secret
   API-key material.
+
+
+## v4.5.2 endpoints
+
+- GET /api/v4.5/deliveries/dead-letters
+- GET /api/v4.5/deliveries/metrics
+- POST /api/v4.5/deliveries/{delivery_id}/replay
+
+## v4.5.2 contract
+
+- Terminal `failed` records are exposed as dead-letter work for inspection;
+  the v4.5.1 status contract remains unchanged.
+- Replay is tenant-scoped, preserves delivery identity, resets the bounded
+  attempt state, and re-enqueues the canonical record through Redis.
+- Metrics are organization-scoped and may be narrowed to a visible enterprise
+  workspace without exposing another tenant's records.
+- Replay operations append to the existing hash-linked enterprise audit chain.
+- Delivery records may carry a visible `workspace_id`; workspace filters are
+  checked through the existing enterprise workspace access contract.

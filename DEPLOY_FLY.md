@@ -166,3 +166,19 @@ Also verify:
 - `release_command`: Alembic/Flask-Migrate database upgrade.
 
 The web process does not start the scheduler, preventing duplicate scheduled jobs. Production web and worker startup never calls `db.create_all()`; schema changes must be represented by Alembic migrations.
+
+
+## v4.5.2 delivery operations
+
+v4.5.2 adds dead-letter inspection, replay, and organization/workspace delivery
+metrics under /api/v4.5. Replay preserves the existing delivery ID, resets
+bounded attempts, and re-enqueues through the Redis stream. Replay actions are
+written to the existing PostgreSQL hash-linked enterprise audit chain. Use the
+workspace filter only for workspaces visible to the authenticated enterprise
+principal; cross-tenant and hidden-workspace records remain inaccessible.
+
+Verify the new endpoints with a scoped API key:
+
+GET  /api/v4.5/deliveries/dead-letters
+GET  /api/v4.5/deliveries/metrics
+POST /api/v4.5/deliveries/{delivery_id}/replay
