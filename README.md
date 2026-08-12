@@ -279,3 +279,17 @@ New endpoints are GET /api/v4.5/deliveries/dead-letters, GET
 /api/v4.5/deliveries/metrics, and POST
 /api/v4.5/deliveries/{delivery_id}/replay. Redis remains required for
 production delivery operations.
+
+
+## Version 4.5.3 — Delivery reliability
+
+v4.5.3 adds read-only delivery infrastructure health at
+GET /api/v4.5/deliveries/health. It reports Redis connectivity, queue stream
+length, consumer-group pending work, retry backlog, and bounded worker
+heartbeat state without returning payloads, destinations, credentials, or
+tenant records.
+
+The delivery worker refreshes a short-lived heartbeat. A missing or stale
+heartbeat returns a degraded health signal; it does not alter queued delivery
+state. The endpoint requires a scoped v4.4/v4.5 API key with
+decision.read permission.
