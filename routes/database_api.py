@@ -103,6 +103,15 @@ def sources():
     return jsonify({"count": len(payload), "sources": payload})
 
 
+@database_bp.get("/coverage")
+def coverage():
+    from coverage_service import coverage_report
+    import nfl_data
+
+    season = request.args.get("season", type=int) or nfl_data.default_season()
+    return jsonify(coverage_report(season))
+
+
 @database_bp.post("/quality/run")
 def quality_run():
     from data_quality import run_quality_checks
