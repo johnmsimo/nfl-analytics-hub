@@ -4,6 +4,7 @@ The module is dependency-light and keeps public contracts deterministic. Profile
 persistence is file-backed with atomic writes so it works on SQLite, PostgreSQL,
 and local development without coupling preferences to the warehouse schema.
 """
+
 from __future__ import annotations
 
 import json
@@ -138,19 +139,23 @@ def calibration_report(predictions: Sequence[Mapping[str, Any]], bins: int = 10)
 
     epsilon = 1e-12
     brier = sum((p - y) ** 2 for p, y in rows) / len(rows)
-    log_loss = -sum(y * math.log(max(p, epsilon)) + (1 - y) * math.log(max(1 - p, epsilon)) for p, y in rows) / len(rows)
+    log_loss = -sum(
+        y * math.log(max(p, epsilon)) + (1 - y) * math.log(max(1 - p, epsilon)) for p, y in rows
+    ) / len(rows)
     accuracy = sum((p >= 0.5) == bool(y) for p, y in rows) / len(rows)
     buckets = []
     for index in range(bins):
         low, high = index / bins, (index + 1) / bins
         selected = [(p, y) for p, y in rows if low <= p < high or (index == bins - 1 and p == 1)]
         if selected:
-            buckets.append({
-                "range": [round(low, 3), round(high, 3)],
-                "count": len(selected),
-                "mean_probability": round(sum(p for p, _ in selected) / len(selected), 4),
-                "observed_rate": round(sum(y for _, y in selected) / len(selected), 4),
-            })
+            buckets.append(
+                {
+                    "range": [round(low, 3), round(high, 3)],
+                    "count": len(selected),
+                    "mean_probability": round(sum(p for p, _ in selected) / len(selected), 4),
+                    "observed_rate": round(sum(y for _, y in selected) / len(selected), 4),
+                }
+            )
     return {
         "count": len(rows),
         "brier_score": round(brier, 6),
@@ -172,9 +177,7 @@ def backtest_report(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         except (TypeError, ValueError):
             continue
         valid.append((probability, outcome, stake, profit))
-    calibration = calibration_report(
-        [{"probability": p, "outcome": y} for p, y, _, _ in valid]
-    )
+    calibration = calibration_report([{"probability": p, "outcome": y} for p, y, _, _ in valid])
     total_stake = sum(stake for _, _, stake, _ in valid)
     total_profit = sum(profit for _, _, _, profit in valid)
     return {
@@ -231,6 +234,6 @@ def generated_report(kind: str, context: Mapping[str, Any]) -> dict[str, Any]:
         "title": title,
         "body": " ".join(lines),
         "grounded": True,
-        "source_fields": sorted(str(key) for key in context.keys()),
+        "source_fields": sorted(str(key) for key in context),
         "version": "3.2",
     }

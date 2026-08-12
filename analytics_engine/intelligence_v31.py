@@ -109,14 +109,14 @@ def game_intelligence(
 
     home_injury = injury_impact(home_injuries)
     away_injury = injury_impact(away_injuries)
-    injury_edge = float(away_injury["rating_penalty"]) - float(home_injury["rating_penalty"])
+    injury_edge = float(str(away_injury["rating_penalty"])) - float(str(home_injury["rating_penalty"]))
     coaching_edge = _coaching_edge(home, away)
     rating_edge = float(home_rating["rating"]) - float(away_rating["rating"])
     home_field = _number(home, "home_field_points", 1.5)
 
     weather_result = _weather_adjustment(weather)
     model_margin = (
-        float(base_matchup["estimated_point_edge"]) * 0.45
+        float(str(base_matchup["estimated_point_edge"])) * 0.45
         + rating_edge * 0.18
         + injury_edge
         + coaching_edge
@@ -157,7 +157,7 @@ def game_intelligence(
             {"factor": "power rating", "home_edge": round(rating_edge * 0.18, 2)},
             {
                 "factor": "offense vs defense",
-                "home_edge": round(float(base_matchup["estimated_point_edge"]) * 0.45, 2),
+                "home_edge": round(float(str(base_matchup["estimated_point_edge"])) * 0.45, 2),
             },
             {"factor": "injury availability", "home_edge": round(injury_edge, 2)},
             {"factor": "coaching", "home_edge": coaching_edge},

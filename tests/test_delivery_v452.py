@@ -31,16 +31,16 @@ def test_dead_letter_listing_is_tenant_and_workspace_scoped():
     assert list_dead_letters(backend, "org_one", workspace_id="other") == []
 
 
-def test_replay_resets_terminal_delivery_and_preserves_identity(app):
-    with app.app_context():
+def test_replay_resets_terminal_delivery_and_preserves_identity(app_fixture):
+    with app_fixture.app_context():
         backend = InMemoryDeliveryBackend()
-        record = _queued(backend)
+        record = _queued(backend, workspace_id=None)
         replay = replay_delivery(
             backend,
             "org_one",
             record["delivery_id"],
             context={"membership_id": "m1"},
-            workspace_id="workspace_one",
+            workspace_id=None,
         )
         assert replay["delivery_id"] == record["delivery_id"]
         assert replay["status"] == "queued"

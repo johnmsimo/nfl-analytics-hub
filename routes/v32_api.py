@@ -1,4 +1,5 @@
 """NFL Analytics Hub v3.2 real-time, personalization, and discovery API."""
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,7 @@ def normalize_dashboard_preferences(payload: Mapping[str, Any] | None) -> dict[s
     """Return a stable, validated dashboard preference profile."""
     data = dict(payload or {})
     requested_modules = data.get("modules", _ALLOWED_MODULES)
-    if not isinstance(requested_modules, (list, tuple)):
+    if not isinstance(requested_modules, list | tuple):
         requested_modules = _ALLOWED_MODULES
 
     modules: list[str] = []
@@ -167,9 +168,7 @@ def events():
     topics = normalize_topics(request.args.get("topics"))
     last_event_id = request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
     return Response(
-        stream_with_context(
-            broker_stream(topics, last_event_id=last_event_id, heartbeat_seconds=heartbeat)
-        ),
+        stream_with_context(broker_stream(topics, last_event_id=last_event_id, heartbeat_seconds=heartbeat)),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",

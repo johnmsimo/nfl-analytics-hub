@@ -1,4 +1,5 @@
 """NFL Analytics Hub v3.2 completion endpoints."""
+
 from __future__ import annotations
 
 import time
@@ -42,10 +43,7 @@ def _json_object() -> dict[str, Any] | None:
 
 def _subject() -> str | None:
     user = session.get("user")
-    if isinstance(user, dict):
-        value = user.get("username") or user.get("id") or user.get("email")
-    else:
-        value = user
+    value = user.get("username") or user.get("id") or user.get("email") if isinstance(user, dict) else user
     subject = str(value or "").strip()
     return subject or None
 
@@ -58,7 +56,9 @@ def _profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "preferences": normalize_dashboard_preferences(payload.get("preferences")),
         "saved_filters": [normalize_saved_filter(item) for item in filters if isinstance(item, dict)][:50],
         "layout": payload.get("layout", {}) if isinstance(payload.get("layout", {}), dict) else {},
-        "watchlist": payload.get("watchlist", [])[:100] if isinstance(payload.get("watchlist", []), list) else [],
+        "watchlist": payload.get("watchlist", [])[:100]
+        if isinstance(payload.get("watchlist", []), list)
+        else [],
     }
 
 

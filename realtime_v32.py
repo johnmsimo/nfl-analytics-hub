@@ -1,4 +1,5 @@
 """Dependency-light v3.2 live event broker and search contracts."""
+
 from __future__ import annotations
 
 import threading
@@ -92,10 +93,11 @@ def normalize_saved_filter(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     data = dict(payload or {})
     name = str(data.get("name", "My filter")).strip()[:80] or "My filter"
     entity_types = data.get("entity_types", list(_ALLOWED_ENTITY_TYPES))
-    if not isinstance(entity_types, (list, tuple, set)):
+    if not isinstance(entity_types, list | tuple | set):
         entity_types = list(_ALLOWED_ENTITY_TYPES)
     normalized_types = [
-        item for item in dict.fromkeys(str(value).strip().lower() for value in entity_types)
+        item
+        for item in dict.fromkeys(str(value).strip().lower() for value in entity_types)
         if item in _ALLOWED_ENTITY_TYPES
     ] or sorted(_ALLOWED_ENTITY_TYPES)
     query = str(data.get("query", "")).strip()[:120]

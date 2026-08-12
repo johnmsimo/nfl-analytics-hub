@@ -45,7 +45,7 @@ def live_win_probability(
 
 
 def epa_summary(plays: Iterable[Mapping[str, object]]) -> dict[str, float | int]:
-    values = [float(play.get("epa") or 0.0) for play in plays]
+    values = [float(str(play.get("epa") or 0.0)) for play in plays]
     if not values:
         return {"plays": 0, "total_epa": 0.0, "epa_per_play": 0.0, "success_rate": 0.0}
     successes = sum(value > 0.0 for value in values)
@@ -61,7 +61,7 @@ def drive_success_summary(drives: Iterable[Mapping[str, object]]) -> dict[str, f
     rows = list(drives)
     if not rows:
         return {"drives": 0, "scoring_rate": 0.0, "touchdown_rate": 0.0, "points_per_drive": 0.0}
-    points = [float(row.get("points") or 0.0) for row in rows]
+    points = [float(str(row.get("points") or 0.0)) for row in rows]
     touchdowns = sum(bool(row.get("touchdown")) or value >= 6 for row, value in zip(rows, points))
     scoring = sum(value > 0 for value in points)
     return {
@@ -150,7 +150,7 @@ def injury_impact(injuries: Iterable[Mapping[str, object]]) -> dict[str, object]
     for item in injuries:
         position = str(item.get("position") or "").upper()
         status = str(item.get("status") or "active").lower()
-        role = _clamp(float(item.get("role_share") or 1.0), 0.0, 1.0)
+        role = _clamp(float(str(item.get("role_share") or 1.0)), 0.0, 1.0)
         impact = _POSITION_WEIGHTS.get(position, 0.25) * _STATUS_WEIGHTS.get(status, 0.35) * role
         total += impact
         details.append(
@@ -190,7 +190,7 @@ def player_similarity(
         )
     return sorted(
         distances,
-        key=lambda row: (-float(row["similarity"]), str(row["player"])),
+        key=lambda row: (-float(str(row["similarity"])), str(row["player"])),
     )[: max(1, limit)]
 
 

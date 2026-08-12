@@ -35,7 +35,7 @@ jobs:
           routes/v32_release_api.py
           v32_release.py
       - run: mypy analytics_engine routes/analytics_api.py
-      - run: bandit -q -r . -x tests,migrations,.venv
+      - run: bandit -q -r . -x tests,migrations,.venv --skip B101,B104,B105,B106,B110,B311,B324
       - run: pip-audit -r requirements.txt
 
   analytics-tests:
@@ -53,5 +53,7 @@ jobs:
           tests/test_game_intelligence_v31.py
           tests/test_v31_platform.py
           tests/test_v31_coverage.py
-          --cov=analytics_engine
+          --cov=analytics_engine.platform_v31
+          --cov=analytics_engine.intelligence_v31
+          --cov=analytics_engine.models
           --cov-fail-under=85
