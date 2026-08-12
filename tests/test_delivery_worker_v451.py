@@ -63,7 +63,7 @@ def test_success_is_signed_and_recorded():
     kwargs = transport.post.call_args.kwargs
     assert kwargs["data"] == b'{"decision_id":"d1","probability":0.62}'
     timestamp = kwargs["headers"]["X-NFL-Delivery-Timestamp"]
-    body = json.dumps(result["payload"], sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    body = kwargs["data"].decode('utf-8')
     expected = hmac.new(
         b"dev-only-delivery-secret",
         f"{timestamp}.{body}".encode(),
@@ -122,8 +122,8 @@ def test_retry_stream_fields_accept_compact_delivery_id():
 
 def test_capabilities_advertise_v451_dispatch_contract():
     manifest = delivery_manifest()
-    assert manifest["version"] == "4.5.2"
-    assert manifest["operations_version"] == "4.5.2"
+    assert manifest["version"] == "4.5.3"
+    assert manifest["operations_version"] == "4.5.3"
     assert manifest["intake_version"] == "4.5.0"
     assert manifest["outbound_delivery_enabled"] is True
     assert manifest["signed_dispatch_worker"] is True
