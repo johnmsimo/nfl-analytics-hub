@@ -34,7 +34,7 @@ def test_dead_letter_listing_is_tenant_and_workspace_scoped():
 def test_replay_resets_terminal_delivery_and_preserves_identity(app_fixture):
     with app_fixture.app_context():
         backend = InMemoryDeliveryBackend()
-        record = _queued(backend)
+        record = _queued(backend, workspace_id=None)
         replay = replay_delivery(
             backend,
             "org_one",
