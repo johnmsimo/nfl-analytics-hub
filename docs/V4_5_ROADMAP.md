@@ -81,3 +81,17 @@ audit guarantees while separating job intake from outbound network delivery.
 - Replay operations append to the existing hash-linked enterprise audit chain.
 - Delivery records may carry a visible `workspace_id`; workspace filters are
   checked through the existing enterprise workspace access contract.
+
+
+## v4.5.3 contract
+
+v4.5.3 adds read-only delivery reliability signals under
+GET /api/v4.5/deliveries/health. The endpoint reports Redis reachability,
+stream length, consumer-group pending count, retry backlog, and bounded worker
+heartbeat state without exposing delivery payloads, destinations, credentials,
+or tenant records.
+
+The delivery worker publishes a short-lived heartbeat with its consumer and
+group identity. A missing or stale heartbeat marks health as degraded; it does
+not mutate delivery state or claim that outbound delivery succeeded. The
+in-memory adapter remains explicitly non-production-ready.
