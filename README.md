@@ -45,6 +45,7 @@ staking, and closing-line capture.
 | `V45_DELIVERY_MAX_ATTEMPTS` | `5` | Maximum outbound attempts per delivery |
 | `V45_DELIVERY_BACKOFF_SECONDS` | `5` | Initial retry backoff; exponential and bounded |
 | `V45_DELIVERY_TIMEOUT_SECONDS` | `10` | Per-destination HTTPS timeout |
+| `V45_DELIVERY_HEARTBEAT_TTL_SECONDS` | `90` | Delivery worker heartbeat freshness window |
 | `PORT` | `10000` dev / `8080` Fly | Bind port |
 
 A `.env` in the repo root is auto-loaded at boot.
