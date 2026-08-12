@@ -45,6 +45,7 @@ staking, and closing-line capture.
 | `V45_DELIVERY_MAX_ATTEMPTS` | `5` | Maximum outbound attempts per delivery |
 | `V45_DELIVERY_BACKOFF_SECONDS` | `5` | Initial retry backoff; exponential and bounded |
 | `V45_DELIVERY_TIMEOUT_SECONDS` | `10` | Per-destination HTTPS timeout |
+| `V45_DELIVERY_HEARTBEAT_TTL_SECONDS` | `90` | Delivery worker heartbeat freshness window |
 | `PORT` | `10000` dev / `8080` Fly | Bind port |
 
 A `.env` in the repo root is auto-loaded at boot.
@@ -278,3 +279,17 @@ New endpoints are GET /api/v4.5/deliveries/dead-letters, GET
 /api/v4.5/deliveries/metrics, and POST
 /api/v4.5/deliveries/{delivery_id}/replay. Redis remains required for
 production delivery operations.
+
+
+## Version 4.5.3 — Delivery reliability
+
+v4.5.3 adds read-only delivery infrastructure health at
+GET /api/v4.5/deliveries/health. It reports Redis connectivity, queue stream
+length, consumer-group pending work, retry backlog, and bounded worker
+heartbeat state without returning payloads, destinations, credentials, or
+tenant records.
+
+The delivery worker refreshes a short-lived heartbeat. A missing or stale
+heartbeat returns a degraded health signal; it does not alter queued delivery
+state. The endpoint requires a scoped v4.4/v4.5 API key with
+decision.read permission.

@@ -1,4 +1,4 @@
-"""Redis-backed v4.5.2 delivery dispatcher.
+"""Redis-backed v4.5.3 delivery dispatcher.
 
 The web process only accepts and queues delivery jobs. This module is the
 separate process that consumes those jobs, signs the canonical JSON payload,
@@ -24,6 +24,8 @@ import requests
 STREAM_SUFFIX = ":stream"
 GROUP_SUFFIX = ":dispatch-group"
 RETRY_SUFFIX = ":retry"
+HEARTBEAT_SUFFIX = ":heartbeat"
+DEFAULT_HEARTBEAT_TTL_SECONDS = 90
 DEFAULT_MAX_ATTEMPTS = 5
 MAX_MAX_ATTEMPTS = 10
 DEFAULT_BACKOFF_SECONDS = 5
@@ -96,6 +98,12 @@ class DeliveryWorker:
             24 * 60 * 60,
         )
         self.ttl_seconds = _env_int("V45_DELIVERY_TTL_SECONDS", 7 * 24 * 60 * 60, 3600, 30 * 24 * 60 * 60)
+        self.heartbeat_ttl_seconds = _env_int(
+            "V45_DELIVERY_HEARTBEAT_TTL_SECONDS",
+            DEFAULT_HEARTBEAT_TTL_SECONDS,
+            30,
+            10 * 60,
+        )
         configured_secret = os.getenv("V45_DELIVERY_SIGNING_SECRET")
         if not configured_secret:
             if os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).lower() == "production":
@@ -103,6 +111,22 @@ class DeliveryWorker:
             configured_secret = os.getenv("SECRET_KEY", "dev-only-delivery-secret")
         self.signing_secret = configured_secret
         self._stop = False
+        self.heartbeat_key = f"{self.prefix}{HEARTBEAT_SUFFIX}:{self.consumer}"
+
+    def _heartbeat(self) -> None:
+        self.client.set(
+            self.heartbeat_key,
+            _canonical(
+                {
+                    "version": "4.5.3",
+                    "consumer": self.consumer,
+                    "group": self.group,
+                    "updated_at": round(self.clock(), 6),
+                    "ttl_seconds": self.heartbeat_ttl_seconds,
+                }
+            ),
+            ex=self.heartbeat_ttl_seconds,
+        )
 
     def _status_key(self, delivery_id: str) -> str:
         return f"{self.prefix}:status:{delivery_id}"
@@ -113,6 +137,7 @@ class DeliveryWorker:
 
     def ensure_group(self) -> None:
         """Create the group from the beginning so pre-worker queued jobs drain."""
+        self._heartbeat()
         try:
             self.client.xgroup_create(self.stream, self.group, id="0-0", mkstream=True)
         except redis.exceptions.ResponseError as exc:
@@ -152,7 +177,7 @@ class DeliveryWorker:
         timestamp = str(int(self.clock()))
         return {
             "Content-Type": "application/json",
-            "User-Agent": "nfl-analytics-hub-v4.5.2",
+            "User-Agent": "nfl-analytics-hub-v4.5.3",
             "X-NFL-Delivery-ID": str(record["delivery_id"]),
             "X-NFL-Event-Type": str(record["event_type"]),
             "X-NFL-Delivery-Timestamp": timestamp,
@@ -289,6 +314,7 @@ class DeliveryWorker:
 
     def run_once(self, *, block_ms: int = 1000) -> int:
         """Process stale, due, and newly queued jobs once; return a count."""
+        self._heartbeat()
         processed = 0
         self._enqueue_due_retries()
         for message_id, fields in self._reclaim_pending():
@@ -318,7 +344,7 @@ class DeliveryWorker:
 def main() -> None:
     redis_url = os.getenv("REDIS_URL")
     if not redis_url:
-        raise SystemExit("REDIS_URL is required for the v4.5.1 dispatch worker")
+        raise SystemExit("REDIS_URL is required for the v4.5.3 dispatch worker")
     client = redis.Redis.from_url(
         redis_url,
         decode_responses=True,

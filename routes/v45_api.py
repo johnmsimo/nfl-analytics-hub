@@ -7,6 +7,7 @@ from typing import Any
 from flask import Blueprint, g, jsonify, request
 
 from decision_delivery_v450 import DeliveryConflictError, delivery_manifest, get_delivery_backend
+from delivery_observability_v453 import delivery_health
 from delivery_operations_v452 import (
     audit_delivery_event,
     delivery_metrics,
@@ -16,7 +17,7 @@ from delivery_operations_v452 import (
 )
 from enterprise_identity_v441 import authorize_context
 
-API_VERSION = "4.5.1"
+API_VERSION = "4.5.3"
 
 v45_bp = Blueprint("v45_api", __name__, url_prefix="/api/v4.5")
 
@@ -60,6 +61,7 @@ def capabilities():
                 "delivery_metrics": True,
                 "workspace_scoped_delivery": True,
                 "audit_integrated_delivery": True,
+                "delivery_health": True,
             },
             "delivery_contract": delivery_manifest(),
             "endpoints": {
@@ -70,6 +72,7 @@ def capabilities():
                 "dead_letters": "/api/v4.5/deliveries/dead-letters",
                 "metrics": "/api/v4.5/deliveries/metrics",
                 "replay": "/api/v4.5/deliveries/{delivery_id}/replay",
+                "health": "/api/v4.5/deliveries/health",
             },
         }
     )
@@ -136,6 +139,18 @@ def list_deliveries():
     except ValueError as exc:
         return jsonify({"error": str(exc), "code": "INVALID_LIMIT"}), 400
     return jsonify({"version": API_VERSION, "deliveries": result})
+
+
+@v45_bp.get("/deliveries/health")
+def get_delivery_health():
+    _context, denied = _api_context("decision.read")
+    if denied is not None:
+        return denied
+    try:
+        result = delivery_health(get_delivery_backend())
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc), "code": "DELIVERY_BACKEND_UNAVAILABLE", "retryable": True}), 503
+    return jsonify(result)
 
 
 @v45_bp.get("/deliveries/dead-letters")
