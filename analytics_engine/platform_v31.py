@@ -43,7 +43,8 @@ def live_game_center(game: Mapping[str, Any]) -> dict[str, Any]:
 def player_intelligence(player: Mapping[str, Any], peers: Iterable[Mapping[str, Any]] = ()) -> dict[str, Any]:
     recent = list(player.get("recent_games") or [])
     values = [_num(game, "fantasy_points") for game in recent]
-    baseline = sum(values) / len(values) if values else _num(player, "season_average")
+    season_average = player.get("season_average")
+    baseline = _num(player, "season_average") if season_average is not None else (sum(values) / len(values) if values else 0.0)
     last3 = sum(values[-3:]) / min(3, len(values)) if values else baseline
     trend = last3 - baseline
     usage = _num(player, "usage_rate")
