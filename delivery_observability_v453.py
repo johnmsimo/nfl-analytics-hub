@@ -1,4 +1,4 @@
-"""Operational health inspection for the v4.5.3 delivery boundary.
+"""Operational health inspection for the v4.5.4 delivery boundary.
 
 The endpoint is intentionally read-only: it reports queue and worker signals
 without exposing payloads, destinations, credentials, or tenant records.
@@ -7,11 +7,14 @@ without exposing payloads, destinations, credentials, or tenant records.
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 
-VERSION = "4.5.3"
+VERSION = "4.5.4"
 DEFAULT_HEARTBEAT_TTL_SECONDS = 90
+DEFAULT_ELEVATED_BACKLOG = 100
+DEFAULT_CRITICAL_BACKLOG = 1000
 
 
 def _text(value: Any) -> str:
@@ -27,6 +30,13 @@ def _pending_count(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _threshold(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
 
 
 def _heartbeat_rows(client: Any, prefix: str, now: float) -> list[dict[str, Any]]:
@@ -54,6 +64,16 @@ def _heartbeat_rows(client: Any, prefix: str, now: float) -> list[dict[str, Any]
     return sorted(rows, key=lambda item: str(item.get("consumer", "")))
 
 
+def _pressure(backlog: int) -> tuple[str, str]:
+    elevated = _threshold("V45_DELIVERY_ELEVATED_BACKLOG", DEFAULT_ELEVATED_BACKLOG)
+    critical = max(elevated, _threshold("V45_DELIVERY_CRITICAL_BACKLOG", DEFAULT_CRITICAL_BACKLOG))
+    if backlog >= critical:
+        return "critical", "scale_delivery_workers_or_pause_new_intake"
+    if backlog >= elevated:
+        return "elevated", "investigate_worker_capacity"
+    return "normal", "none"
+
+
 def delivery_health(backend: Any, *, now: float | None = None) -> dict[str, Any]:
     """Return bounded delivery infrastructure signals for the API contract."""
     timestamp = time.time() if now is None else float(now)
@@ -70,6 +90,9 @@ def delivery_health(backend: Any, *, now: float | None = None) -> dict[str, Any]
             "stream_length": None,
             "pending_count": None,
             "retry_backlog": None,
+            "total_backlog": None,
+            "pressure": None,
+            "recommendation": None,
             "consumer_group": None,
         },
         "workers": {
@@ -77,22 +100,30 @@ def delivery_health(backend: Any, *, now: float | None = None) -> dict[str, Any]
             "active_count": 0,
             "consumers": [],
         },
+        "redis": {"probe_latency_ms": None},
     }
     if client is None:
         result["status"] = "degraded"
         result["reason"] = "in_memory_backend"
         return result
     try:
+        probe_started = time.perf_counter()
         client.ping()
+        result["redis"]["probe_latency_ms"] = round((time.perf_counter() - probe_started) * 1000, 3)
         stream = f"{prefix}:stream"
-        group = getattr(__import__("os"), "environ", {}).get(
-            "V45_DELIVERY_CONSUMER_GROUP", "v451-dispatch"
-        )
+        group = os.environ.get("V45_DELIVERY_CONSUMER_GROUP", "v451-dispatch")
+        pending_count = _pending_count(client.xpending(stream, group))
+        retry_backlog = int(client.zcard(f"{prefix}:retry"))
+        total_backlog = pending_count + retry_backlog
+        pressure, recommendation = _pressure(total_backlog)
         result["queue"].update(
             {
                 "stream_length": int(client.xlen(stream)),
-                "pending_count": _pending_count(client.xpending(stream, group)),
-                "retry_backlog": int(client.zcard(f"{prefix}:retry")),
+                "pending_count": pending_count,
+                "retry_backlog": retry_backlog,
+                "total_backlog": total_backlog,
+                "pressure": pressure,
+                "recommendation": recommendation,
                 "consumer_group": group,
             }
         )
@@ -102,7 +133,13 @@ def delivery_health(backend: Any, *, now: float | None = None) -> dict[str, Any]
             "active_count": sum(1 for item in workers if item.get("active")),
             "consumers": workers[:20],
         }
-        if result["workers"]["observed_count"] == 0:
+        if pressure == "critical":
+            result["status"] = "degraded"
+            result["reason"] = "delivery_backlog_critical"
+        elif pressure == "elevated":
+            result["status"] = "degraded"
+            result["reason"] = "delivery_backlog_elevated"
+        elif result["workers"]["observed_count"] == 0:
             result["status"] = "degraded"
             result["reason"] = "worker_heartbeat_not_observed"
         elif result["workers"]["active_count"] == 0:
