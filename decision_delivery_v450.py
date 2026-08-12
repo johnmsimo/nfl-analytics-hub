@@ -353,10 +353,11 @@ def get_delivery_backend() -> InMemoryDeliveryBackend | RedisDeliveryBackend:
 
 def delivery_manifest() -> dict[str, Any]:
     return {
-        "version": "4.5.2",
+        "version": "4.5.3",
         "intake_version": VERSION,
         "dispatch_version": DISPATCH_VERSION,
         "operations_version": "4.5.2",
+        "observability_version": "4.5.3",
         "status_values": ["queued", "dispatching", "delivered", "retrying", "failed", "dead_letter"],
         "intake_status": "queued",
         "outbound_delivery_enabled": True,
