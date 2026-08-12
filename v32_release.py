@@ -231,6 +231,6 @@ def generated_report(kind: str, context: Mapping[str, Any]) -> dict[str, Any]:
         "title": title,
         "body": " ".join(lines),
         "grounded": True,
-        "source_fields": sorted(str(key) for key in context.keys()),
+        "source_fields": sorted(str(key) for key in context),
         "version": "3.2",
     }
