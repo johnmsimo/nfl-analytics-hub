@@ -157,7 +157,7 @@ def game_intelligence(
             {"factor": "power rating", "home_edge": round(rating_edge * 0.18, 2)},
             {
                 "factor": "offense vs defense",
-                "home_edge": round(float(base_matchup["estimated_point_edge"]) * 0.45, 2),
+                "home_edge": round(float(str(base_matchup["estimated_point_edge"])) * 0.45, 2),
             },
             {"factor": "injury availability", "home_edge": round(injury_edge, 2)},
             {"factor": "coaching", "home_edge": coaching_edge},
