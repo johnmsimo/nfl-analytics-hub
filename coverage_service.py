@@ -283,7 +283,10 @@ def coverage_report(season: int) -> dict:
 
 def _latest_sync() -> dict | None:
     latest = db.session.scalar(
-        select(DataSyncRun).order_by(DataSyncRun.finished_at.desc()).limit(1)
+        select(DataSyncRun)
+        .where(DataSyncRun.finished_at.is_not(None))
+        .order_by(DataSyncRun.finished_at.desc())
+        .limit(1)
     )
     if not latest:
         return None
