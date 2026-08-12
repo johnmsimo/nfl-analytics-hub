@@ -1,4 +1,4 @@
-"""Redis-backed v4.5.2 delivery dispatcher.
+"""Redis-backed v4.5.3 delivery dispatcher.
 
 The web process only accepts and queues delivery jobs. This module is the
 separate process that consumes those jobs, signs the canonical JSON payload,
@@ -177,7 +177,7 @@ class DeliveryWorker:
         timestamp = str(int(self.clock()))
         return {
             "Content-Type": "application/json",
-            "User-Agent": "nfl-analytics-hub-v4.5.2",
+            "User-Agent": "nfl-analytics-hub-v4.5.3",
             "X-NFL-Delivery-ID": str(record["delivery_id"]),
             "X-NFL-Event-Type": str(record["event_type"]),
             "X-NFL-Delivery-Timestamp": timestamp,
@@ -344,7 +344,7 @@ class DeliveryWorker:
 def main() -> None:
     redis_url = os.getenv("REDIS_URL")
     if not redis_url:
-        raise SystemExit("REDIS_URL is required for the v4.5.1 dispatch worker")
+        raise SystemExit("REDIS_URL is required for the v4.5.3 dispatch worker")
     client = redis.Redis.from_url(
         redis_url,
         decode_responses=True,
