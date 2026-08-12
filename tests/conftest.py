@@ -21,3 +21,7 @@ def warehouse_seed():
 def client():
     with app.test_client() as c:
         yield c
+
+@pytest.fixture()
+def app_fixture():
+    return app
