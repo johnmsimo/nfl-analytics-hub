@@ -53,5 +53,7 @@ jobs:
           tests/test_game_intelligence_v31.py
           tests/test_v31_platform.py
           tests/test_v31_coverage.py
-          --cov=analytics_engine
+          --cov=analytics_engine.platform_v31
+          --cov=analytics_engine.intelligence_v31
+          --cov=analytics_engine.models
           --cov-fail-under=85
