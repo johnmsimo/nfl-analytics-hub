@@ -11,8 +11,8 @@ from pathlib import Path
 from flask import Flask
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from sqlalchemy import event
 
 
 db = SQLAlchemy(session_options={"expire_on_commit": False})
