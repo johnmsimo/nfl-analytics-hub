@@ -42,10 +42,11 @@ def _json_object() -> dict[str, Any] | None:
 
 def _subject() -> str | None:
     user = session.get("user")
-    if isinstance(user, dict):
-        value = user.get("username") or user.get("id") or user.get("email")
-    else:
-        value = user
+    value = (
+        user.get("username") or user.get("id") or user.get("email")
+        if isinstance(user, dict)
+        else user
+    )
     subject = str(value or "").strip()
     return subject or None
 
