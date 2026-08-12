@@ -30,7 +30,7 @@ def normalize_dashboard_preferences(payload: Mapping[str, Any] | None) -> dict[s
     """Return a stable, validated dashboard preference profile."""
     data = dict(payload or {})
     requested_modules = data.get("modules", _ALLOWED_MODULES)
-    if not isinstance(requested_modules, (list, tuple)):
+    if not isinstance(requested_modules, list | tuple):
         requested_modules = _ALLOWED_MODULES
 
     modules: list[str] = []
