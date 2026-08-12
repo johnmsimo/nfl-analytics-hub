@@ -31,20 +31,21 @@ def test_dead_letter_listing_is_tenant_and_workspace_scoped():
     assert list_dead_letters(backend, "org_one", workspace_id="other") == []
 
 
-def test_replay_resets_terminal_delivery_and_preserves_identity():
-    backend = InMemoryDeliveryBackend()
-    record = _queued(backend)
-    replay = replay_delivery(
-        backend,
-        "org_one",
-        record["delivery_id"],
-        context={"membership_id": "m1"},
-        workspace_id="workspace_one",
-    )
-    assert replay["delivery_id"] == record["delivery_id"]
-    assert replay["status"] == "queued"
-    assert replay["attempts"] == 0
-    assert replay["replay_count"] == 1
+def test_replay_resets_terminal_delivery_and_preserves_identity(app):
+    with app.app_context():
+        backend = InMemoryDeliveryBackend()
+        record = _queued(backend)
+        replay = replay_delivery(
+            backend,
+            "org_one",
+            record["delivery_id"],
+            context={"membership_id": "m1"},
+            workspace_id="workspace_one",
+        )
+        assert replay["delivery_id"] == record["delivery_id"]
+        assert replay["status"] == "queued"
+        assert replay["attempts"] == 0
+        assert replay["replay_count"] == 1
 
 
 def test_metrics_report_terminal_and_attempt_counts():
