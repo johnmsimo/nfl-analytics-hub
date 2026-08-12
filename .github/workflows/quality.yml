@@ -28,12 +28,12 @@ jobs:
           v32_release.py
       - name: Check production v3.2 formatting
         run: >-
-          ruff format --diff
+          ruff format --check
           database.py
           realtime_v32.py
           routes/v32_api.py
           routes/v32_release_api.py
-          v32_release.py || true
+          v32_release.py
       - run: mypy analytics_engine routes/analytics_api.py
       - run: bandit -q -r . -x tests,migrations,.venv
       - run: pip-audit -r requirements.txt
