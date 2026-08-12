@@ -92,7 +92,7 @@ def normalize_saved_filter(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     data = dict(payload or {})
     name = str(data.get("name", "My filter")).strip()[:80] or "My filter"
     entity_types = data.get("entity_types", list(_ALLOWED_ENTITY_TYPES))
-    if not isinstance(entity_types, (list, tuple, set)):
+    if not isinstance(entity_types, list | tuple | set):
         entity_types = list(_ALLOWED_ENTITY_TYPES)
     normalized_types = [
         item for item in dict.fromkeys(str(value).strip().lower() for value in entity_types)
