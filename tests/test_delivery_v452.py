@@ -40,7 +40,7 @@ def test_replay_resets_terminal_delivery_and_preserves_identity(app_fixture):
             "org_one",
             record["delivery_id"],
             context={"membership_id": "m1"},
-            workspace_id="workspace_one",
+            workspace_id=None,
         )
         assert replay["delivery_id"] == record["delivery_id"]
         assert replay["status"] == "queued"
