@@ -1,4 +1,5 @@
 """NFL Analytics Hub v3.2 real-time, personalization, and discovery API."""
+
 from __future__ import annotations
 
 import json
@@ -167,9 +168,7 @@ def events():
     topics = normalize_topics(request.args.get("topics"))
     last_event_id = request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
     return Response(
-        stream_with_context(
-            broker_stream(topics, last_event_id=last_event_id, heartbeat_seconds=heartbeat)
-        ),
+        stream_with_context(broker_stream(topics, last_event_id=last_event_id, heartbeat_seconds=heartbeat)),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
