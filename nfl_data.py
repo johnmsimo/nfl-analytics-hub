@@ -163,29 +163,45 @@ def fetch_week_scoreboard(season: int, week: int, seasontype: int = 2,
 
 
 def get_schedule(season: int, refresh: bool = False) -> list[dict]:
-    """Full-season schedule (REG 1-18 + POST). Disk-cached; past seasons are
-    permanent, the current/future season refreshes every 6h."""
+    """Full-season schedule (REG 1-18 + POST).
+
+    A provider outage must not take the application down. If a refresh fails,
+    the last valid disk snapshot is returned, even when it is stale. When no
+    snapshot exists, an empty schedule lets callers render a degraded but
+    usable dashboard.
+    """
     key = f"sched:{season}"
+    cached = _read_json(f"schedule_{season}.json")
     if not refresh:
         hit = _mem_get(key)
         if hit is not None:
             return hit
-        cached = _read_json(f"schedule_{season}.json")
         if cached:
             age = time.time() - cached.get("fetched_at", 0)
-            season_over = all(g["completed"] for g in cached["games"]) and cached["games"]
+            season_over = all(g["completed"] for g in cached.get("games", [])) and cached.get("games")
             if season_over or age < 6 * 3600:
-                _mem_set(key, cached["games"], 300)
-                return cached["games"]
+                _mem_set(key, cached.get("games", []), 300)
+                return cached.get("games", [])
 
     games: list[dict] = []
-    for wk in REG_WEEKS:
-        games.extend(fetch_week_scoreboard(season, wk, 2, ttl=1))
-    for wk in POST_WEEKS:
-        try:
-            games.extend(fetch_week_scoreboard(season, wk, 3, ttl=1))
-        except RuntimeError:
-            break
+    try:
+        for wk in REG_WEEKS:
+            games.extend(fetch_week_scoreboard(season, wk, 2, ttl=1))
+        for wk in POST_WEEKS:
+            try:
+                games.extend(fetch_week_scoreboard(season, wk, 3, ttl=1))
+            except RuntimeError:
+                break
+    except Exception as exc:  # noqa: BLE001
+        stale_games = cached.get("games") if isinstance(cached, dict) else None
+        if isinstance(stale_games, list):
+            print(f"[nfl_data] schedule refresh failed; using stale cache: {exc}")
+            _mem_set(key, stale_games, 300)
+            return stale_games
+        print(f"[nfl_data] schedule unavailable; continuing without games: {exc}")
+        _mem_set(key, [], 60)
+        return []
+
     _write_json(f"schedule_{season}.json", {"fetched_at": time.time(), "games": games})
     _mem_set(key, games, 300)
     return games
@@ -201,7 +217,11 @@ def default_season(today: datetime | None = None) -> int:
 def current_week(season: int | None = None) -> dict:
     """First week containing a non-final game (else the last played week)."""
     season = season or default_season()
-    games = get_schedule(season)
+    try:
+        games = get_schedule(season)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[nfl_data] current week unavailable; using offseason default: {exc}")
+        games = []
     if not games:
         return {"season": season, "week": 1, "season_type": "REG"}
     for g in games:
