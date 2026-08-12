@@ -3,7 +3,7 @@
 SQLite is the zero-configuration development default. Set DATABASE_URL to a
 PostgreSQL URL in production. SQLAlchemy keeps the domain model portable.
 """
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import os
 from pathlib import Path
@@ -11,8 +11,8 @@ from pathlib import Path
 from flask import Flask
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.engine import Engine
 from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 
 db = SQLAlchemy(session_options={"expire_on_commit": False})
