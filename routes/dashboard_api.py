@@ -113,7 +113,11 @@ def api_dashboard():
         "trend": trend,
         "engine": {
             "status": "online", "version": "Analytics v1.0",
-            "data_coverage": 1.0 if teams else 0.0,
+            "data_coverage": round(min(len(teams) / 32, 1.0), 3),
+            "covered_team_count": len(teams),
+            "expected_team_count": 32,
+            "coverage_status": "complete" if len(teams) >= 32 else ("partial" if teams else "empty"),
+            "source_chain": ["nflverse", "espn"],
             "odds_configured": odds_api.is_configured(),
             "model_note": "Transparent heuristic estimates from team performance and projection data.",
         },
