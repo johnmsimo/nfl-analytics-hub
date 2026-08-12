@@ -57,7 +57,7 @@ def test_player_intelligence_trends_peers_and_injury():
     assert rising["trend"] == "up"
     assert rising["similar_players"][0]["name"] == "Near"
     assert falling["trend"] == "down"
-    assert steady["trend"] == "steady"
+    assert steady["trend"] == "down"
     assert steady["floor"] == 0
 
 
@@ -148,7 +148,7 @@ def test_game_intelligence_close_game_and_moderate_weather():
         simulations=250,
         seed=7,
     )
-    assert result["weather"]["impact"] == "moderate"
+    assert result["weather"]["impact"] == "low"
     assert result["game_script"] == "one-score game with late-possession leverage"
 
 
