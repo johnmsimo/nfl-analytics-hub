@@ -57,7 +57,7 @@ def test_player_intelligence_trends_peers_and_injury():
     assert rising["trend"] == "up"
     assert rising["similar_players"][0]["name"] == "Near"
     assert falling["trend"] == "down"
-    assert steady["trend"] == "down"
+    assert steady["trend"] == "steady"
     assert steady["floor"] == 0
 
 
