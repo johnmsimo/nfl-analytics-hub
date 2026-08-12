@@ -108,7 +108,7 @@ class DeliveryWorker:
         if not configured_secret:
             if os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).lower() == "production":
                 raise RuntimeError("V45_DELIVERY_SIGNING_SECRET is required in production")
-            configured_secret = os.getenv("SECRET_KEY", "dev-only-delivery-secret")
+            configured_secret = "dev-only-delivery-secret"
         self.signing_secret = configured_secret
         self._stop = False
         self.heartbeat_key = f"{self.prefix}{HEARTBEAT_SUFFIX}:{self.consumer}"
