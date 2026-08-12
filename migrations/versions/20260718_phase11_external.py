@@ -6,7 +6,7 @@ Revises: 20260718_phase10
 from alembic import op
 import sqlalchemy as sa
 revision = "20260718_phase11"
-down_revision = "20260718_phase10"
+down_revision = "20260811_base_schema"
 branch_labels = None
 depends_on = None
 
