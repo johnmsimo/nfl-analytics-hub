@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from database import db
 from source_registry import capture_raw, register_source
+from team_identity import normalize_team
 from db_models import (
     Coach, CoachingAssignment, DataSyncRun, Game, Player, PlayerGameStat, PlayerTeamSeason, Season, Team,
 )
@@ -40,6 +41,7 @@ def _num(value, integer=False):
 
 
 def _upsert_team(abbr, name=None, external_id=None):
+    abbr = normalize_team(abbr)
     if not abbr:
         return None
     team = db.session.scalar(select(Team).where(Team.abbreviation == abbr))
