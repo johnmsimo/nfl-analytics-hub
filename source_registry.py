@@ -32,7 +32,11 @@ def register_source(key: str, name: str, *, source_type: str = "file", base_url:
 def capture_raw(source: DataSource, entity_type: str, external_id: str, payload: dict,
                 *, season: int | None = None, week: int | None = None,
                 observed_at: datetime | None = None) -> bool:
+    # Providers hand us dates, Decimals and numpy scalars. The hash has always
+    # coerced them via default=str; the stored payload must be coerced the same
+    # way or the column's own json.dumps raises and kills the whole sync.
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    payload = json.loads(canonical)
     payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     existing = db.session.scalar(select(RawIngestRecord.id).where(
         RawIngestRecord.source_id == source.id,
