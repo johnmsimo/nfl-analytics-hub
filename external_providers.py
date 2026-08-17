@@ -19,14 +19,14 @@ from database import db
 from db_models import (DataSource, DataSyncRun, DepthChartEntry, Game, InjuryReport,
                        Player, PlayerTeamSeason, Season, SnapCount, Team)
 from source_registry import capture_raw, register_source
+from team_identity import normalize_team
 
 NFLVERSE_BASE = "https://github.com/nflverse/nflverse-data/releases/download"
-TEAM_ALIASES = {"JAX": "JAC", "LA": "LAR", "STL": "LAR", "SD": "LAC", "OAK": "LV"}
 
 
 def _team(value):
-    key = str(value or "").strip().upper()
-    return TEAM_ALIASES.get(key, key)
+    """Canonical abbreviation, shared with the ESPN cache importer."""
+    return normalize_team(value) or ""
 
 
 def _int(value):

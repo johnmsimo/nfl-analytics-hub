@@ -28,7 +28,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
-import requests
+import http_client
 
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
 
@@ -38,9 +38,6 @@ DATA_DIR = (
     or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 )
 os.makedirs(DATA_DIR, exist_ok=True)
-
-_HTTP = requests.Session()
-_HTTP.headers.update({"User-Agent": "nfl-analytics-hub/1.0"})
 
 _lock = threading.RLock()
 _mem: dict = {}          # key -> (expires_epoch, value)
@@ -67,7 +64,7 @@ def _get_json(url: str, timeout: int = 20, retries: int = 2):
     last = None
     for i in range(retries + 1):
         try:
-            r = _HTTP.get(url, timeout=timeout)
+            r = http_client.get(url, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
             last = f"HTTP {r.status_code}"
@@ -88,6 +85,11 @@ def _mem_get(key: str):
 def _mem_set(key: str, value, ttl: float):
     with _lock:
         _mem[key] = (time.time() + ttl, value)
+
+
+# A failed fetch must not be memoized for the success TTL: that turns a blip at
+# the provider into an outage lasting the full window, long after it recovered.
+FAILURE_TTL = float(os.environ.get("NFL_FAILURE_TTL_SEC", "45"))
 
 
 def _disk_path(name: str) -> str:
@@ -278,6 +280,7 @@ def get_injuries(refresh: bool = False) -> list[dict]:
     if hit is not None and not refresh:
         return hit
     out: list[dict] = []
+    ok = True
     try:
         data = _get_json(f"{ESPN_BASE}/injuries")
         abbrs = _team_abbrev_map()
@@ -297,8 +300,9 @@ def get_injuries(refresh: bool = False) -> list[dict]:
                     "comment": (i.get("shortComment") or "")[:280],
                 })
     except Exception as e:  # noqa: BLE001
+        ok = False
         print(f"[nfl_data] injuries fetch failed: {e}")
-    _mem_set(key, out, 3600)
+    _mem_set(key, out, 3600 if ok else FAILURE_TTL)
     return out
 
 
@@ -309,6 +313,7 @@ def get_news(limit: int = 12) -> list[dict]:
     if hit is not None:
         return hit
     out: list[dict] = []
+    ok = True
     try:
         data = _get_json(f"{ESPN_BASE}/news?limit={limit}")
         for a in data.get("articles", [])[:limit]:
@@ -320,8 +325,9 @@ def get_news(limit: int = 12) -> list[dict]:
                 "link": link,
             })
     except Exception as e:  # noqa: BLE001
+        ok = False
         print(f"[nfl_data] news fetch failed: {e}")
-    _mem_set(key, out, 900)
+    _mem_set(key, out, 900 if ok else FAILURE_TTL)
     return out
 
 

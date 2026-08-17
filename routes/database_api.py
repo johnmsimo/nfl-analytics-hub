@@ -12,6 +12,7 @@ from analytics_warehouse import rebuild_analytics
 from db_models import (Coach, CoachingAssignment, CoachSeasonStat, DataSyncRun, Game,
     Player, PlayerGameStat, PlayerSeasonStat, Team, TeamGameStat, TeamSeasonStat,
     DataSource, RawIngestRecord, DataQualityIssue)
+from team_identity import normalize_team
 
 
 database_bp = Blueprint("database", __name__, url_prefix="/api/data")
@@ -140,7 +141,9 @@ def quality_issues():
 @database_bp.get("/teams/<abbr>/profile")
 def team_profile(abbr):
     from db_models import TeamSeasonStat
-    team = db.session.scalar(db.select(Team).where(Team.abbreviation == abbr.upper()))
+    # The ESPN-backed frontend sends JAX/WSH; the warehouse stores JAC/WAS.
+    canonical = normalize_team(abbr)
+    team = db.session.scalar(db.select(Team).where(Team.abbreviation == canonical)) if canonical else None
     if not team:
         return jsonify({"error": "team_not_found"}), 404
     seasons = db.session.scalars(db.select(TeamSeasonStat).where(

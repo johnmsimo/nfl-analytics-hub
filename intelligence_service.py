@@ -6,10 +6,15 @@ from database import db
 from db_models import (DataSource, DataSyncRun, Game, InjuryReport, OddsSnapshot,
                        Player, Play, Prediction, Team, TeamAdvancedSeasonStat,
                        TeamSeasonStat, WeatherObservation)
+from team_identity import normalize_team
 
 
 def _team(abbr: str) -> Team | None:
-    return db.session.scalar(db.select(Team).where(Team.abbreviation == abbr.upper()))
+    """Resolve a team by any accepted code; the ESPN frontend sends JAX/WSH."""
+    canonical = normalize_team(abbr)
+    if not canonical:
+        return None
+    return db.session.scalar(db.select(Team).where(Team.abbreviation == canonical))
 
 
 def _latest_source_status():
