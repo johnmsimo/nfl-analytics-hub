@@ -36,7 +36,12 @@ def session() -> requests.Session:
     client = requests.Session()
     client.mount("https://", adapter)
     client.mount("http://", adapter)
-    client.headers.update({"User-Agent": os.environ.get("HTTP_USER_AGENT", "nfl-analytics-hub/3.0")})
+    # ESPN's Akamai edge rejects branded agents with HTTP 403 while allowing the
+    # default client token, so no User-Agent is set unless one is configured.
+    # Set HTTP_USER_AGENT to identify the app to providers that expect it.
+    configured_agent = os.environ.get("HTTP_USER_AGENT")
+    if configured_agent:
+        client.headers.update({"User-Agent": configured_agent})
     return client
 
 
