@@ -45,3 +45,35 @@ def test_changed_payload_is_captured_as_a_new_version(app_fixture):
         assert capture_raw(source, "roster", "ver-1", {"seen": date(2026, 1, 2)})
         db.session.commit()
         assert capture_raw(source, "roster", "ver-1", {"seen": date(2026, 1, 3)})
+
+
+def test_primed_cache_dedupes_without_querying(app_fixture):
+    """Bulk imports prime the cache; repeats must be rejected from memory."""
+    from source_registry import clear_raw_cache, prime_raw_cache
+
+    with app_fixture.app_context():
+        source = register_source("test-primed", "Primed source")
+        db.session.flush()
+        prime_raw_cache(source, "roster")
+        payload = {"seen": date(2026, 5, 1)}
+        assert capture_raw(source, "roster", "primed-1", payload)
+        # Second call hits the primed set, not the database.
+        assert not capture_raw(source, "roster", "primed-1", payload)
+        # A changed payload is still a new version.
+        assert capture_raw(source, "roster", "primed-1", {"seen": date(2026, 5, 2)})
+        clear_raw_cache()
+
+
+def test_prime_reports_existing_rows_and_clear_restores_queries(app_fixture):
+    from source_registry import clear_raw_cache, prime_raw_cache
+
+    with app_fixture.app_context():
+        source = register_source("test-prime-count", "Prime count source")
+        db.session.flush()
+        assert capture_raw(source, "roster", "count-1", {"a": 1})
+        db.session.commit()
+        assert prime_raw_cache(source, "roster") >= 1
+        assert not capture_raw(source, "roster", "count-1", {"a": 1})
+        clear_raw_cache()
+        # Unprimed, the per-row query still finds the stored row.
+        assert not capture_raw(source, "roster", "count-1", {"a": 1})

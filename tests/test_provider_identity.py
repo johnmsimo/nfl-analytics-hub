@@ -1,0 +1,104 @@
+"""Importer contracts against the current nflverse schemas.
+
+Each of these encodes a defect that made a whole dataset import zero rows.
+"""
+
+
+import external_providers as ep
+from database import db
+from db_models import Team
+
+
+def test_snap_game_key_parses_the_nflverse_id():
+    row = {"game_id": "2025_01_ARI_NO"}
+    assert ep._snap_game_key(row) == (1, "ARI", "NO")
+
+
+def test_snap_game_key_canonicalizes_team_codes():
+    """The feed writes JAX/WAS variants the warehouse stores canonically."""
+    assert ep._snap_game_key({"game_id": "2025_19_BUF_JAX"}) == (19, "BUF", "JAC")
+
+
+def test_snap_game_key_rejects_malformed_ids():
+    for bad in ({"game_id": ""}, {"game_id": "2025_01_ARI"}, {}, {"game_id": "a_b_c_d"}):
+        assert ep._snap_game_key(bad) is None or ep._snap_game_key(bad)[0] is None
+
+
+def test_normalized_name_folds_punctuation_and_suffixes():
+    assert ep._normalized_name("Ja'Marr Chase") == ep._normalized_name("JaMarr Chase")
+    assert ep._normalized_name("Michael Pittman Jr.") == ep._normalized_name("Michael Pittman")
+    assert ep._normalized_name("A.J.  Brown") == ep._normalized_name("AJ Brown")
+
+
+def test_postseason_games_get_a_week_agnostic_key(app_fixture):
+    """nflverse numbers the playoffs 19+; the schedule stores POST weeks 1-5."""
+    with app_fixture.app_context():
+        _, games = ep._game_lookup(2025)
+        post_keys = [k for k in games if k[0] is None]
+        assert post_keys, "postseason matchups must be registered without a week"
+        # Every week-agnostic key must resolve to an actual postseason game.
+        for key in post_keys:
+            assert games[key].season_type == "POST"
+
+
+def test_player_index_prime_and_clear(app_fixture):
+    with app_fixture.app_context():
+        assert ep.prime_player_index() > 0
+        assert ep._players_by_ext is not None
+        hit = ep._ensure_player({"gsis_id": next(iter(ep._players_by_ext)), "full_name": "X"})
+        assert hit is not None
+        ep.clear_player_index()
+        assert ep._players_by_ext is None
+
+
+def test_ensure_player_records_the_pfr_id(app_fixture):
+    with app_fixture.app_context():
+        p = ep._ensure_player({"gsis_id": "00-TEST-PFR", "full_name": "Test Back", "pfr_id": "TestB00"})
+        db.session.flush()
+        assert p.pfr_id == "TestB00"
+
+
+def test_injury_report_no_longer_requires_a_report_date(app_fixture):
+    """The nflverse injury feed publishes no date; the grain is per week."""
+    from db_models import InjuryReport
+
+    with app_fixture.app_context():
+        team = db.session.scalars(db.select(Team)).first()
+        player = ep._ensure_player({"gsis_id": "00-TEST-INJ", "full_name": "Test End"})
+        db.session.flush()
+        item = InjuryReport(
+            player_id=player.id, team_id=team.id, season=2025, week=4, report_date=None
+        )
+        db.session.add(item)
+        db.session.flush()
+        assert item.id is not None
+        db.session.rollback()
+
+
+class _FakeSlice:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def to_dicts(self):
+        return list(self._rows)
+
+
+class _FakeFrame:
+    """Stands in for the polars frame nflreadpy returns."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.slices_taken = 0
+
+    def iter_slices(self, n):
+        for i in range(0, len(self._rows), n):
+            self.slices_taken += 1
+            yield _FakeSlice(self._rows[i : i + n])
+
+
+def test_frame_rows_stream_in_slices_without_materializing():
+    rows = [{"i": i} for i in range(45)]
+    frame = _FakeFrame(rows)
+    out = list(ep._iter_frame_rows(frame, chunk=20))
+    assert out == rows
+    assert frame.slices_taken == 3, "must consume the frame in slices, not one block"
