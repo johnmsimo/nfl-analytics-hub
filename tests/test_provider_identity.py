@@ -3,7 +3,6 @@
 Each of these encodes a defect that made a whole dataset import zero rows.
 """
 
-
 import external_providers as ep
 from database import db
 from db_models import Team
@@ -66,9 +65,7 @@ def test_injury_report_no_longer_requires_a_report_date(app_fixture):
         team = db.session.scalars(db.select(Team)).first()
         player = ep._ensure_player({"gsis_id": "00-TEST-INJ", "full_name": "Test End"})
         db.session.flush()
-        item = InjuryReport(
-            player_id=player.id, team_id=team.id, season=2025, week=4, report_date=None
-        )
+        item = InjuryReport(player_id=player.id, team_id=team.id, season=2025, week=4, report_date=None)
         db.session.add(item)
         db.session.flush()
         assert item.id is not None
@@ -102,3 +99,56 @@ def test_frame_rows_stream_in_slices_without_materializing():
     out = list(ep._iter_frame_rows(frame, chunk=20))
     assert out == rows
     assert frame.slices_taken == 3, "must consume the frame in slices, not one block"
+
+
+def test_json_columns_accept_provider_date_types(app_fixture):
+    """Feeds hand raw rows with dates straight into JSON columns."""
+    import datetime as dt
+
+    from db_models import InjuryReport
+
+    with app_fixture.app_context():
+        team = db.session.scalars(db.select(Team)).first()
+        player = ep._ensure_player({"gsis_id": "00-TEST-JSON", "full_name": "Test Guard"})
+        db.session.flush()
+        item = InjuryReport(
+            player_id=player.id,
+            team_id=team.id,
+            season=2016,
+            week=2,
+            raw_payload={"date_modified": dt.datetime(2016, 9, 9), "seen": dt.date(2016, 9, 9)},
+        )
+        db.session.add(item)
+        db.session.flush()  # would raise TypeError without the engine's encoder
+        assert item.id is not None
+        db.session.rollback()
+
+
+def test_weekly_depth_charts_identify_by_club_code_and_week():
+    """Charts through 2024 name the club `club_code` and carry no date."""
+    row = {
+        "club_code": "JAX",
+        "week": 3,
+        "depth_position": "S",
+        "depth_team": "2",
+        "gsis_id": "00-0030427",
+        "full_name": "Legacy Player",
+        "position": "SS",
+    }
+    assert ep._team(row.get("team") or row.get("club_code")) == "JAC"
+    assert ep._int(row.get("pos_rank") or row.get("depth_rank") or row.get("depth_team")) == 2
+
+
+def test_dated_depth_charts_identify_by_dt_and_pos_rank():
+    """Snapshots from 2025 name the club `team` and carry no week."""
+    row = {
+        "team": "WSH",
+        "dt": "2025-08-03T07:32:00",
+        "pos_abb": "LDE",
+        "pos_rank": "1",
+        "gsis_id": "00-0034381",
+        "player_name": "Dated Player",
+    }
+    assert ep._team(row.get("team") or row.get("club_code")) == "WAS"
+    assert ep._date(row.get("dt")) is not None
+    assert row.get("week") is None

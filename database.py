@@ -6,8 +6,10 @@ PostgreSQL URL in production. SQLAlchemy keeps the domain model portable.
 
 from __future__ import annotations  # noqa: I001
 
+import json
 import os
 from pathlib import Path
+from typing import Any
 
 from flask import Flask
 from flask_migrate import Migrate
@@ -33,6 +35,11 @@ def _sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
     cursor.close()
 
 
+def _json_dumps(value: Any) -> str:
+    """Serialize JSON columns, stringifying types the stdlib encoder rejects."""
+    return json.dumps(value, default=str)
+
+
 def configure_database(app: Flask) -> None:
     root = Path(app.root_path)
     default_path = root / "data" / "nfl_analytics.db"
@@ -44,7 +51,15 @@ def configure_database(app: Flask) -> None:
     # `fly postgres attach` exports) makes SQLAlchemy try psycopg2 and crash.
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg://" + url[len("postgresql://") :]
-    engine_options = {"pool_pre_ping": True, "pool_recycle": 300}
+    # Provider feeds hand raw rows straight into JSON columns, and those rows
+    # carry dates, datetimes and Decimals depending on the season. The stdlib
+    # encoder rejects them and aborts the whole import, so every JSON column
+    # gets an encoder that stringifies what it cannot represent natively.
+    engine_options = {
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+        "json_serializer": _json_dumps,
+    }
     if url.startswith("postgresql"):
         engine_options.update(
             {

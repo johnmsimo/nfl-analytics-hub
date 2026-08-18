@@ -297,7 +297,8 @@ def sync_depth_charts(season: int) -> dict:
     existing = {
         tuple(r) for r in db.session.execute(
             db.select(DepthChartEntry.player_id, DepthChartEntry.team_id,
-                      DepthChartEntry.chart_date, DepthChartEntry.depth_position)
+                      DepthChartEntry.week, DepthChartEntry.chart_date,
+                      DepthChartEntry.depth_position)
             .where(DepthChartEntry.season == season)
         ).all()
     }
@@ -312,22 +313,27 @@ def sync_depth_charts(season: int) -> dict:
 
     try:
         for row in rows:
-            read += 1; player = _ensure_player(row); team = teams.get(_team(row.get("team"))); chart_date = _date(row.get("dt") or row.get("date") or row.get("chart_date"))
-            if not player or not team or not chart_date:
+            read += 1; player = _ensure_player(row)
+            # Weekly charts name the club `club_code`; dated snapshots use `team`.
+            team = teams.get(_team(row.get("team") or row.get("club_code")))
+            chart_date = _date(row.get("dt") or row.get("date") or row.get("chart_date"))
+            week = _int(row.get("week"))
+            # One of the two grains must identify the row.
+            if not player or not team or (chart_date is None and week is None):
                 skipped += 1; continue
             depth_pos = row.get("pos_abb") or row.get("depth_position") or row.get("position")
-            entry_key = (player.id, team.id, chart_date, depth_pos)
+            entry_key = (player.id, team.id, week, chart_date, depth_pos)
             # Dated snapshots are append-only: a key already stored is the same
             # observation, so re-runs skip it instead of rewriting the row.
             if entry_key in existing:
                 unchanged += 1; continue
             existing.add(entry_key)
-            week = _int(row.get("week"))
             pending.append({
                 "player_id": player.id, "team_id": team.id, "season": season,
                 "week": week, "chart_date": chart_date, "position": row.get("position"),
                 "depth_position": depth_pos,
-                "depth_rank": _int(row.get("pos_rank") or row.get("depth_rank")),
+                # `pos_rank` on dated snapshots, `depth_team` on weekly charts.
+                "depth_rank": _int(row.get("pos_rank") or row.get("depth_rank") or row.get("depth_team")),
                 "source_key": "nflverse", "raw_payload": row,
                 "created_at": now, "updated_at": now,
             })

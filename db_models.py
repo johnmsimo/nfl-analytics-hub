@@ -782,7 +782,9 @@ class DepthChartEntry(TimestampMixin, db.Model):
     team_id = db.Column(db.Integer, db.ForeignKey("teams.id"), nullable=False)
     season = db.Column(db.Integer, db.ForeignKey("seasons.year"), nullable=False)
     week = db.Column(db.Integer)
-    chart_date = db.Column(db.Date, nullable=False)
+    # Weekly charts (through 2024) carry no date; dated snapshots (2025+) carry
+    # no week. Both grains live here, so neither column can be required.
+    chart_date = db.Column(db.Date)
     position = db.Column(db.String(16), index=True)
     depth_position = db.Column(db.String(24), index=True)
     depth_rank = db.Column(db.Integer, index=True)
@@ -790,7 +792,8 @@ class DepthChartEntry(TimestampMixin, db.Model):
     raw_payload = db.Column(db.JSON)
     __table_args__ = (
         db.UniqueConstraint(
-            "player_id", "team_id", "chart_date", "depth_position", name="uq_depth_chart_entry"
+            "player_id", "team_id", "season", "week", "chart_date", "depth_position",
+            name="uq_depth_chart_entry",
         ),
         db.Index("ix_depth_chart_current", "season", "week", "team_id", "depth_position", "depth_rank"),
     )
