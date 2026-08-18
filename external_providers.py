@@ -105,62 +105,143 @@ def _game_lookup(season: int):
         away = db.session.get(Team, g.away_team_id)
         if not home or not away:
             continue
-        by_matchup[(g.week, away.abbreviation, home.abbreviation)] = g
+        # Key on season type as well as week: a wildcard rematch of a week-1
+        # game shares (week, away, home) with it, and in 2024 two such pairs
+        # existed, so a week-only key silently pointed regular-season rows at
+        # the playoff game.
+        by_matchup[(g.season_type, g.week, away.abbreviation, home.abbreviation)] = g
         # nflverse numbers the postseason continuously (19, 20, 21, ...) while
-        # the schedule stores POST weeks 1-5. Postseason matchups are unique, so
-        # register a week-agnostic key the callers fall back to.
+        # the schedule stores POST weeks 1-5. Postseason matchups are unique
+        # within a season, so register a week-agnostic key for them.
         if g.season_type == "POST":
-            by_matchup[(None, away.abbreviation, home.abbreviation)] = g
+            by_matchup[("POST", None, away.abbreviation, home.abbreviation)] = g
     return teams, by_matchup
 
 
+_POST_TYPES = {"POST", "WC", "DIV", "CON", "CONF", "SB"}
+
+
+def _resolve_game(games, row, week, away, home):
+    """Find the scheduled game a provider row belongs to.
+
+    Feeds label the postseason explicitly, which matters because the regular
+    season ran 17 weeks through 2020 and 18 from 2021, so a week number alone
+    cannot say which side of the split a row is on.
+    """
+    kind = str(row.get("season_type") or row.get("game_type") or "").strip().upper()
+    if kind in _POST_TYPES:
+        return games.get(("POST", None, away, home))
+    if kind == "REG":
+        return games.get(("REG", week, away, home))
+    # No label: postseason week numbering continues past the regular season.
+    if week is not None and week > 18:
+        return games.get(("POST", None, away, home))
+    return games.get(("REG", week, away, home)) or games.get(("POST", None, away, home))
+
+
+def _play_mapping(row, game_id, sequence, teams) -> dict:
+    """Flatten one nflverse play row onto the Play columns."""
+    posteam, defteam = teams.get(_team(row.get("posteam"))), teams.get(_team(row.get("defteam")))
+    y100 = _int(row.get("yardline_100"))
+    return {
+        "game_id": game_id,
+        "sequence": sequence,
+        "drive_id": str(row.get("drive") or "") or None,
+        "quarter": _int(row.get("qtr")),
+        "clock_seconds": _int(row.get("quarter_seconds_remaining")),
+        "offense_team_id": posteam.id if posteam else None,
+        "defense_team_id": defteam.id if defteam else None,
+        "down": _int(row.get("down")),
+        "yards_to_go": _int(row.get("ydstogo")),
+        "yard_line": 100 - y100 if y100 is not None else None,
+        "play_type": row.get("play_type"),
+        "description": row.get("desc"),
+        "yards_gained": _float(row.get("yards_gained")),
+        "first_down": str(row.get("first_down") or "0") == "1",
+        "touchdown": str(row.get("touchdown") or "0") == "1",
+        "turnover": str(row.get("interception") or "0") == "1" or str(row.get("fumble_lost") or "0") == "1",
+        "expected_points_before": _float(row.get("ep")),
+        "expected_points_after": _float(row.get("ep_after")),
+        "epa": _float(row.get("epa")),
+        "success": str(row.get("success") or "0") == "1",
+        "win_probability_before": _float(row.get("wp")),
+        "win_probability_after": _float(row.get("vegas_wp")),
+        "wpa": _float(row.get("wpa")),
+        "personnel": row.get("offense_personnel"),
+        "formation": row.get("offense_formation"),
+        # The full 370-column row is deliberately not duplicated here: it is
+        # ~10.6 KB per play and source_registry already stores it once, with the
+        # hash this importer uses to spot revisions. Writing it twice cost about
+        # a gigabyte per season for a column nothing reads.
+    }
+
+
 def sync_pbp(season: int) -> dict:
-    """Import nflverse play-by-play for a season directly into the Play table."""
+    """Import nflverse play-by-play for a season directly into the Play table.
+
+    A season is ~50k plays and the widest feed there is, so this follows the
+    same shape as the other bulk imports: prime the provenance hashes, hold only
+    the play keys already stored, and insert in bounded batches. A play whose
+    payload is unchanged is left alone, which makes re-runs cheap; nflverse does
+    revise the current season, so a changed payload still rewrites the row.
+    """
     from db_models import Play
-    source = _source(); run = _start_run("pbp", season)
-    read = written = skipped = 0
+    source = _source(); run = _start_run("pbp", season); prime_raw_cache(source, "play")
+    read = written = skipped = unchanged = updated = 0
     url = f"{NFLVERSE_BASE}/pbp/play_by_play_{season}.csv.gz"
     try:
         teams, games = _game_lookup(season)
+        season_game_ids = {g.id for g in games.values()}
+        stored = {
+            ext: pid for pid, ext in db.session.execute(
+                db.select(Play.id, Play.external_id).where(Play.game_id.in_(season_game_ids))
+            ).all()
+        } if season_game_ids else {}
+        pending: list[dict] = []
+        revisions: list[dict] = []
+        now = datetime.now(timezone.utc)
+
+        def _flush():
+            if pending:
+                db.session.bulk_insert_mappings(Play, pending); pending.clear()
+            if revisions:
+                db.session.bulk_update_mappings(Play, revisions); revisions.clear()
+            db.session.commit()
+
         for row in _download_csv(url):
             read += 1
             week = _int(row.get("week"))
             away_abbr, home_abbr = _team(row.get("away_team")), _team(row.get("home_team"))
-            game = games.get((week, away_abbr, home_abbr)) or games.get((None, away_abbr, home_abbr))
+            game = _resolve_game(games, row, week, away_abbr, home_abbr)
             play_id = str(row.get("play_id") or "")
             if not game or not play_id:
                 skipped += 1; continue
             external_id = f"nflverse:{row.get('game_id')}:{play_id}"
-            play = db.session.scalar(db.select(Play).where(Play.external_id == external_id))
-            if not play:
-                play = Play(external_id=external_id, game_id=game.id, sequence=_int(play_id) or read)
-                db.session.add(play)
-            posteam, defteam = teams.get(_team(row.get("posteam"))), teams.get(_team(row.get("defteam")))
-            play.drive_id = str(row.get("drive") or "") or None
-            play.quarter = _int(row.get("qtr"))
-            play.clock_seconds = _int(row.get("quarter_seconds_remaining"))
-            play.offense_team_id = posteam.id if posteam else None
-            play.defense_team_id = defteam.id if defteam else None
-            play.down = _int(row.get("down")); play.yards_to_go = _int(row.get("ydstogo"))
-            y100 = _int(row.get("yardline_100")); play.yard_line = 100 - y100 if y100 is not None else None
-            play.play_type = row.get("play_type"); play.description = row.get("desc")
-            play.yards_gained = _float(row.get("yards_gained"))
-            play.first_down = str(row.get("first_down") or "0") == "1"
-            play.touchdown = str(row.get("touchdown") or "0") == "1"
-            play.turnover = str(row.get("interception") or "0") == "1" or str(row.get("fumble_lost") or "0") == "1"
-            play.expected_points_before = _float(row.get("ep")); play.expected_points_after = _float(row.get("ep_after"))
-            play.epa = _float(row.get("epa")); play.success = str(row.get("success") or "0") == "1"
-            play.win_probability_before = _float(row.get("wp")); play.win_probability_after = _float(row.get("vegas_wp"))
-            play.wpa = _float(row.get("wpa")); play.personnel = row.get("offense_personnel"); play.formation = row.get("offense_formation")
-            play.raw_payload = row
-            capture_raw(source, "play", external_id, row, season=season, week=week)
-            written += 1
-            if written % 5000 == 0:
-                db.session.commit()
-        db.session.commit(); _finish(run, source, read, written)
-        return {"provider": "nflverse", "dataset": "pbp", "season": season, "read": read, "written": written, "skipped": skipped, "url": url}
+            changed = capture_raw(source, "play", external_id, row, season=season, week=week)
+            if external_id in stored:
+                existing_id = stored[external_id]
+                # None means this run already queued the insert, so a repeated
+                # play id in the feed must not be inserted a second time.
+                if existing_id is None or not changed:
+                    unchanged += 1; continue
+                revisions.append({"id": existing_id, "updated_at": now,
+                                  **_play_mapping(row, game.id, _int(play_id) or read, teams)})
+                updated += 1
+            else:
+                stored[external_id] = None
+                pending.append({"external_id": external_id, "created_at": now, "updated_at": now,
+                                **_play_mapping(row, game.id, _int(play_id) or read, teams)})
+                written += 1
+            if len(pending) + len(revisions) >= 10000:
+                _flush()
+        _flush(); _finish(run, source, read, written); clear_raw_cache()
+        return {"provider": "nflverse", "dataset": "pbp", "season": season, "read": read,
+                "written": written, "updated": updated, "unchanged": unchanged,
+                "skipped": skipped, "url": url}
     except Exception as exc:
-        db.session.rollback(); source = _source(); run = db.session.get(DataSyncRun, run.id) or _start_run("pbp", season); _finish(run, source, read, written, exc)
+        db.session.rollback(); clear_raw_cache()
+        source = _source(); run = db.session.get(DataSyncRun, run.id) or _start_run("pbp", season)
+        _finish(run, source, read, written, exc)
         raise
 
 
@@ -387,7 +468,7 @@ def sync_snap_counts(season: int) -> dict:
             read += 1
             team = teams.get(_team(row.get("team"))); week = _int(row.get("week"))
             key = _snap_game_key(row)
-            game = games.get(key) or (games.get((None, key[1], key[2])) if key else None)
+            game = _resolve_game(games, row, key[0], key[1], key[2]) if key else None
             player_id = by_pfr.get(str(row.get("pfr_player_id") or "").strip())
             if player_id is None and team is not None:
                 player_id = by_name.get((_normalized_name(row.get("player")), team.abbreviation))
