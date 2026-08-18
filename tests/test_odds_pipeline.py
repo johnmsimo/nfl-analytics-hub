@@ -314,3 +314,119 @@ def test_nfl_nicknames_are_unique_so_the_fallback_is_unambiguous():
                 names[g[f"{side}_team"]] = g[f"{side}_name"]
     nicks = [odds_api._nickname(n) for n in names.values()]
     assert len(nicks) == len(set(nicks)), "two clubs share a nickname; the fallback is unsafe"
+
+
+# ------------------------------------------------- closing capture, once only
+
+
+def _pending_pick(game_id="401872656", **over):
+    pick = {
+        "id": "p1",
+        "gameId": game_id,
+        "season": 2026,
+        "grade": "pending",
+        "marketKey": "pass_yds",
+        "line": 219.5,
+        "side": "over",
+        "price": -110,
+        "player": "Drake Maye",
+        "closingPrice": None,
+        "openingImplied": 0.5238,
+    }
+    pick.update(over)
+    return pick
+
+
+def _closing_env(monkeypatch, tmp_path, picks, live_payload):
+    """Point the tracker at a scratch store with one game inside its window."""
+    import tracker
+
+    store = {"2026-09-09": {"entries": picks}}
+    saved = {}
+    monkeypatch.setattr(tracker, "_load", lambda: store)
+    monkeypatch.setattr(tracker, "_save", lambda s: saved.update({"store": s}))
+    monkeypatch.setattr(tracker, "_kickoff_window", lambda game: True)
+    monkeypatch.setattr(tracker, "_closing_captured", set())
+    monkeypatch.setattr(
+        tracker.nfl_data,
+        "get_schedule",
+        lambda season: [
+            {"game_id": "401872656", "home_name": "Seattle Seahawks", "away_name": "New England Patriots"}
+        ],
+    )
+    monkeypatch.setattr(tracker.odds_api, "is_configured", lambda: True)
+    monkeypatch.setattr(tracker.odds_api, "find_event_for_game", lambda g: {"id": "evt"})
+    calls = []
+
+    def _live(event_id, markets=None):
+        calls.append(event_id)
+        return live_payload
+
+    monkeypatch.setattr(tracker.odds_api, "fetch_event_odds_live", _live)
+    return tracker, store, calls
+
+
+def test_closing_capture_buys_a_game_once_even_when_no_line_matches(monkeypatch, tmp_path):
+    """The book moving off the pick's number must not re-buy every cycle."""
+    payload = {
+        "bookmakers": [
+            {
+                "title": "DraftKings",
+                "markets": [
+                    {
+                        "key": "player_pass_yds",
+                        "outcomes": [
+                            # A different line than the pick's 219.5, so nothing matches.
+                            {"name": "Over", "description": "Drake Maye", "point": 244.5, "price": -110},
+                            {"name": "Under", "description": "Drake Maye", "point": 244.5, "price": -110},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    tracker, store, calls = _closing_env(monkeypatch, tmp_path, [_pending_pick()], payload)
+
+    tracker.closing_capture_once()
+    assert len(calls) == 1
+    assert store["2026-09-09"]["closingAttempted"] == ["401872656"]
+
+    # A restart clears the in-process guard; the stored attempt must still hold.
+    monkeypatch.setattr(tracker, "_closing_captured", set())
+    tracker.closing_capture_once()
+    assert len(calls) == 1, "a restart re-bought closing odds already paid for"
+
+
+def test_closing_capture_records_price_and_clv_when_the_line_matches(monkeypatch, tmp_path):
+    payload = {
+        "bookmakers": [
+            {
+                "title": "DraftKings",
+                "markets": [
+                    {
+                        "key": "player_pass_yds",
+                        "outcomes": [
+                            {"name": "Over", "description": "Drake Maye", "point": 219.5, "price": -140},
+                            {"name": "Under", "description": "Drake Maye", "point": 219.5, "price": 115},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    pick = _pending_pick()
+    tracker, store, calls = _closing_env(monkeypatch, tmp_path, [pick], payload)
+
+    result = tracker.closing_capture_once()
+    assert result["captured"] == 1
+    assert pick["closingPrice"] == -140
+    # Closing implied above opening implied means the pick beat the close.
+    assert pick["clvEdge"] > 0, "positive CLV is the tracker's primary KPI"
+    assert pick["closingImplied"] > pick["openingImplied"]
+
+
+def test_closing_capture_skips_picks_that_already_have_a_price(monkeypatch, tmp_path):
+    priced = _pending_pick(closingPrice=-120)
+    tracker, store, calls = _closing_env(monkeypatch, tmp_path, [priced], {})
+    tracker.closing_capture_once()
+    assert not calls, "a pick with a closing price must not trigger another buy"
