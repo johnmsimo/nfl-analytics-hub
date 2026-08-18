@@ -107,7 +107,13 @@ def import_player_week(path: str | Path, source=None) -> dict:
             if not game or not team or not opponent or not row.get("player_id"):
                 skipped += 1
                 continue
-            player = db.session.scalar(select(Player).where(Player.external_id == str(row["player_id"])))
+            # The cache names athletes by ESPN id; the nflverse feeds name them
+            # by gsis id. Resolve onto the existing player when the roster feed
+            # has already mapped the two, so one person keeps one row.
+            espn_id = str(row["player_id"])
+            player = db.session.scalar(select(Player).where(Player.espn_id == espn_id))
+            if not player:
+                player = db.session.scalar(select(Player).where(Player.external_id == espn_id))
             if not player:
                 name = row.get("player_name") or str(row["player_id"])
                 parts = name.split(" ", 1)

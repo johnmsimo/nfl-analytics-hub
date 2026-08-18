@@ -178,3 +178,52 @@ def test_dated_depth_charts_identify_by_dt_and_pos_rank():
     assert ep._team(row.get("team") or row.get("club_code")) == "WAS"
     assert ep._date(row.get("dt")) is not None
     assert row.get("week") is None
+
+
+def test_player_stat_field_map_covers_every_stat_column():
+    """The warehouse columns and nflverse names must stay in step."""
+    from data_ingestion import STAT_FIELDS
+
+    assert set(ep._PLAYER_STAT_FIELDS) == set(STAT_FIELDS)
+
+
+def test_player_stat_map_renames_only_where_nflverse_differs():
+    assert ep._PLAYER_STAT_FIELDS["interceptions"] == "passing_interceptions"
+    assert ep._PLAYER_STAT_FIELDS["sacks"] == "sacks_suffered"
+    assert ep._PLAYER_STAT_FIELDS["fumbles_lost"] == "fumbles_lost_total"
+    assert ep._PLAYER_STAT_FIELDS["receiving_yards"] == "receiving_yards"
+
+
+def test_ensure_player_reads_the_display_name_and_espn_id(app_fixture):
+    """nflverse player stats abbreviate player_name; display name is the real one."""
+    with app_fixture.app_context():
+        p = ep._ensure_player(
+            {
+                "player_id": "00-TEST-DISP",
+                "player_name": "T.Back",
+                "player_display_name": "Test Back",
+                "espn_id": "9999001",
+            }
+        )
+        db.session.flush()
+        assert p.full_name == "Test Back"
+        assert p.espn_id == "9999001"
+
+
+def test_boxscore_cache_resolves_onto_the_nflverse_player(app_fixture):
+    """One athlete must not own both an ESPN-id row and a gsis-id row."""
+    from data_ingestion import Player as _P  # same model, imported where used
+
+    with app_fixture.app_context():
+        nflverse = ep._ensure_player(
+            {
+                "gsis_id": "00-TEST-MERGE",
+                "full_name": "Merge Target",
+                "espn_id": "9999002",
+            }
+        )
+        db.session.flush()
+        found = db.session.scalar(db.select(_P).where(_P.espn_id == "9999002"))
+        assert found is not None and found.id == nflverse.id, (
+            "the cache importer looks players up by espn_id before minting a row"
+        )

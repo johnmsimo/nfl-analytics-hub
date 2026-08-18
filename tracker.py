@@ -307,17 +307,31 @@ def closing_capture_once() -> dict:
         for e in pend:
             if e.get("gameId"):
                 by_game.setdefault(e["gameId"], []).append(e)
+        # The in-process guard below is wiped by any restart, and Fly stops idle
+        # machines by design, so the fact that a game's closing odds were already
+        # bought has to outlive the process. Picks whose closing price was
+        # recorded drop out on their own, but a game whose line moved off every
+        # pick's number records nothing and would otherwise be re-bought — about
+        # nine credits a time, every five minutes of its kickoff window.
+        attempted = set(day.get("closingAttempted") or [])
         for gid, entries in by_game.items():
             season = int(entries[0].get("season") or nfl_data.default_season())
             game = next((g for g in nfl_data.get_schedule(season)
                          if g["game_id"] == gid), None)
-            if not game or gid in _closing_captured or not _kickoff_window(game):
+            if not game or gid in _closing_captured or gid in attempted:
+                continue
+            if not _kickoff_window(game):
                 continue
             ev = odds_api.find_event_for_game(game)
             if not ev:
                 continue
             data = odds_api.fetch_event_odds_live(ev["id"])
             _closing_captured.add(gid)
+            # The credit is spent whether or not a line matched, so persist the
+            # attempt, not just a successful capture.
+            attempted.add(gid)
+            day["closingAttempted"] = sorted(attempted)
+            changed = True
             rows = odds_api.parse_prop_markets(data or {})
             gm = odds_api.parse_game_markets({**ev, **(data or {})})
             for e in entries:
