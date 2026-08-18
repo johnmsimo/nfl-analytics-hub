@@ -105,13 +105,38 @@ def _game_lookup(season: int):
         away = db.session.get(Team, g.away_team_id)
         if not home or not away:
             continue
-        by_matchup[(g.week, away.abbreviation, home.abbreviation)] = g
+        # Key on season type as well as week: a wildcard rematch of a week-1
+        # game shares (week, away, home) with it, and in 2024 two such pairs
+        # existed, so a week-only key silently pointed regular-season rows at
+        # the playoff game.
+        by_matchup[(g.season_type, g.week, away.abbreviation, home.abbreviation)] = g
         # nflverse numbers the postseason continuously (19, 20, 21, ...) while
-        # the schedule stores POST weeks 1-5. Postseason matchups are unique, so
-        # register a week-agnostic key the callers fall back to.
+        # the schedule stores POST weeks 1-5. Postseason matchups are unique
+        # within a season, so register a week-agnostic key for them.
         if g.season_type == "POST":
-            by_matchup[(None, away.abbreviation, home.abbreviation)] = g
+            by_matchup[("POST", None, away.abbreviation, home.abbreviation)] = g
     return teams, by_matchup
+
+
+_POST_TYPES = {"POST", "WC", "DIV", "CON", "CONF", "SB"}
+
+
+def _resolve_game(games, row, week, away, home):
+    """Find the scheduled game a provider row belongs to.
+
+    Feeds label the postseason explicitly, which matters because the regular
+    season ran 17 weeks through 2020 and 18 from 2021, so a week number alone
+    cannot say which side of the split a row is on.
+    """
+    kind = str(row.get("season_type") or row.get("game_type") or "").strip().upper()
+    if kind in _POST_TYPES:
+        return games.get(("POST", None, away, home))
+    if kind == "REG":
+        return games.get(("REG", week, away, home))
+    # No label: postseason week numbering continues past the regular season.
+    if week is not None and week > 18:
+        return games.get(("POST", None, away, home))
+    return games.get(("REG", week, away, home)) or games.get(("POST", None, away, home))
 
 
 def _play_mapping(row, game_id, sequence, teams) -> dict:
@@ -187,7 +212,7 @@ def sync_pbp(season: int) -> dict:
             read += 1
             week = _int(row.get("week"))
             away_abbr, home_abbr = _team(row.get("away_team")), _team(row.get("home_team"))
-            game = games.get((week, away_abbr, home_abbr)) or games.get((None, away_abbr, home_abbr))
+            game = _resolve_game(games, row, week, away_abbr, home_abbr)
             play_id = str(row.get("play_id") or "")
             if not game or not play_id:
                 skipped += 1; continue
@@ -443,7 +468,7 @@ def sync_snap_counts(season: int) -> dict:
             read += 1
             team = teams.get(_team(row.get("team"))); week = _int(row.get("week"))
             key = _snap_game_key(row)
-            game = games.get(key) or (games.get((None, key[1], key[2])) if key else None)
+            game = _resolve_game(games, row, key[0], key[1], key[2]) if key else None
             player_id = by_pfr.get(str(row.get("pfr_player_id") or "").strip())
             if player_id is None and team is not None:
                 player_id = by_name.get((_normalized_name(row.get("player")), team.abbreviation))

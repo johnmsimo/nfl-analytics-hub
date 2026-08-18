@@ -33,11 +33,30 @@ def test_postseason_games_get_a_week_agnostic_key(app_fixture):
     """nflverse numbers the playoffs 19+; the schedule stores POST weeks 1-5."""
     with app_fixture.app_context():
         _, games = ep._game_lookup(2025)
-        post_keys = [k for k in games if k[0] is None]
+        post_keys = [k for k in games if k[0] == "POST" and k[1] is None]
         assert post_keys, "postseason matchups must be registered without a week"
-        # Every week-agnostic key must resolve to an actual postseason game.
         for key in post_keys:
             assert games[key].season_type == "POST"
+
+
+def test_a_wildcard_rematch_does_not_capture_regular_season_rows(app_fixture):
+    """2024 had GB@PHI and WAS@TB in both week 1 and the wildcard round."""
+    with app_fixture.app_context():
+        _, games = ep._game_lookup(2024)
+        for away, home in (("GB", "PHI"), ("WAS", "TB")):
+            reg = ep._resolve_game(games, {"season_type": "REG"}, 1, away, home)
+            post = ep._resolve_game(games, {"season_type": "POST"}, 19, away, home)
+            assert reg is not None and post is not None
+            assert reg.id != post.id, f"{away}@{home} week 1 resolved to the playoff game"
+            assert reg.season_type == "REG" and post.season_type == "POST"
+
+
+def test_unlabelled_rows_split_on_the_week_number(app_fixture):
+    with app_fixture.app_context():
+        _, games = ep._game_lookup(2025)
+        post_key = next(k for k in games if k[0] == "POST" and k[1] is None)
+        _, _, away, home = post_key
+        assert ep._resolve_game(games, {}, 21, away, home) is games[post_key]
 
 
 def test_player_index_prime_and_clear(app_fixture):
