@@ -40,15 +40,48 @@ def test_postseason_games_get_a_week_agnostic_key(app_fixture):
 
 
 def test_a_wildcard_rematch_does_not_capture_regular_season_rows(app_fixture):
-    """2024 had GB@PHI and WAS@TB in both week 1 and the wildcard round."""
+    """A playoff rematch shares (week, away, home) with the week-1 meeting.
+
+    2024 had two of these — GB at PHI and WAS at TB — but the fixture is built
+    here rather than read from a season, so the test does not depend on which
+    schedules happen to be on disk.
+    """
+    from db_models import Game, Season
+
     with app_fixture.app_context():
-        _, games = ep._game_lookup(2024)
-        for away, home in (("GB", "PHI"), ("WAS", "TB")):
-            reg = ep._resolve_game(games, {"season_type": "REG"}, 1, away, home)
-            post = ep._resolve_game(games, {"season_type": "POST"}, 19, away, home)
+        away = db.session.scalars(db.select(Team).where(Team.abbreviation == "GB")).one()
+        home = db.session.scalars(db.select(Team).where(Team.abbreviation == "PHI")).one()
+        if not db.session.get(Season, 2024):
+            db.session.add(Season(year=2024))
+            db.session.flush()
+        # Same matchup, same week number, opposite sides of the season split.
+        reg_game = Game(
+            external_id="test-reg-2024",
+            season=2024,
+            season_type="REG",
+            week=1,
+            home_team_id=home.id,
+            away_team_id=away.id,
+        )
+        post_game = Game(
+            external_id="test-post-2024",
+            season=2024,
+            season_type="POST",
+            week=1,
+            home_team_id=home.id,
+            away_team_id=away.id,
+        )
+        db.session.add_all([reg_game, post_game])
+        db.session.flush()
+        try:
+            _, games = ep._game_lookup(2024)
+            reg = ep._resolve_game(games, {"season_type": "REG"}, 1, "GB", "PHI")
+            post = ep._resolve_game(games, {"season_type": "POST"}, 19, "GB", "PHI")
             assert reg is not None and post is not None
-            assert reg.id != post.id, f"{away}@{home} week 1 resolved to the playoff game"
+            assert reg.id != post.id, "week 1 resolved to the playoff game"
             assert reg.season_type == "REG" and post.season_type == "POST"
+        finally:
+            db.session.rollback()
 
 
 def test_unlabelled_rows_split_on_the_week_number(app_fixture):
@@ -124,11 +157,16 @@ def test_json_columns_accept_provider_date_types(app_fixture):
     """Feeds hand raw rows with dates straight into JSON columns."""
     import datetime as dt
 
-    from db_models import InjuryReport
+    from db_models import InjuryReport, Season
 
     with app_fixture.app_context():
         team = db.session.scalars(db.select(Team)).first()
         player = ep._ensure_player({"gsis_id": "00-TEST-JSON", "full_name": "Test Guard"})
+        # injury_reports.season is a foreign key, and only the seasons whose
+        # schedules ship in the repo get seeded, so state the precondition here
+        # rather than assume a historical season has been loaded.
+        if not db.session.get(Season, 2016):
+            db.session.add(Season(year=2016))
         db.session.flush()
         item = InjuryReport(
             player_id=player.id,
@@ -138,9 +176,11 @@ def test_json_columns_accept_provider_date_types(app_fixture):
             raw_payload={"date_modified": dt.datetime(2016, 9, 9), "seen": dt.date(2016, 9, 9)},
         )
         db.session.add(item)
-        db.session.flush()  # would raise TypeError without the engine's encoder
-        assert item.id is not None
-        db.session.rollback()
+        try:
+            db.session.flush()  # would raise TypeError without the engine's encoder
+            assert item.id is not None
+        finally:
+            db.session.rollback()
 
 
 def test_weekly_depth_charts_identify_by_club_code_and_week():
