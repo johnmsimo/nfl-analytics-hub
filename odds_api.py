@@ -125,11 +125,31 @@ def norm_player_name(name: str | None) -> str:
     return s.lower().replace(".", "").replace("'", "").replace("-", " ").strip()
 
 
+def _nickname(name: str | None) -> str:
+    """Last word of a club name. Unique across all 32 NFL teams."""
+    parts = _norm(name).split()
+    return parts[-1] if parts else ""
+
+
 def find_event_for_game(game: dict) -> dict | None:
-    """Match an ESPN schedule game to an Odds API event by full team names."""
+    """Match an ESPN schedule game to an Odds API event.
+
+    Full names usually agree, but the two sources spell cities differently often
+    enough (``LA Rams`` against ``Los Angeles Rams``) that an exact match alone
+    would leave a priced board looking empty. Nicknames are unique across the
+    league, so they settle anything the exact match misses.
+    """
     home, away = _norm(game.get("home_name")), _norm(game.get("away_name"))
-    for ev in get_game_odds():
+    events = get_game_odds()
+    for ev in events:
         if _norm(ev.get("home_team")) == home and _norm(ev.get("away_team")) == away:
+            return ev
+    home_nick, away_nick = _nickname(game.get("home_name")), _nickname(game.get("away_name"))
+    if not home_nick or not away_nick:
+        return None
+    for ev in events:
+        if (_nickname(ev.get("home_team")) == home_nick
+                and _nickname(ev.get("away_team")) == away_nick):
             return ev
     return None
 
