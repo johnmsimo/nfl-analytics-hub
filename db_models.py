@@ -89,6 +89,9 @@ class Player(TimestampMixin, db.Model):
     # Pro-Football-Reference id, published by the roster feed and the only
     # identifier the snap-count feed carries.
     pfr_id = db.Column(db.String(20), unique=True, index=True)
+    # ESPN athlete id, so the boxscore cache resolves onto the same player the
+    # nflverse feeds create rather than minting a second row.
+    espn_id = db.Column(db.String(20), unique=True, index=True)
     full_name = db.Column(db.String(140), nullable=False, index=True)
     first_name = db.Column(db.String(70))
     last_name = db.Column(db.String(70), index=True)

@@ -255,6 +255,7 @@ def _load_nflreadpy(dataset: str, season: int):
         "injuries": nfl.load_injuries,
         "depth_charts": nfl.load_depth_charts,
         "snap_counts": nfl.load_snap_counts,
+        "player_stats": nfl.load_player_stats,
     }[dataset]
     frame = fn([season])
     # Materializing a whole season at once costs roughly a gigabyte for depth
@@ -289,7 +290,10 @@ def clear_player_index() -> None:
 
 def _ensure_player(row) -> Player | None:
     ext = str(row.get("gsis_id") or row.get("player_id") or row.get("nflverse_id") or "").strip()
-    name = str(row.get("full_name") or row.get("player_name") or row.get("name") or "").strip()
+    name = str(
+        row.get("full_name") or row.get("player_display_name")
+        or row.get("player_name") or row.get("name") or ""
+    ).strip()
     if not ext or not name:
         return None
     if _players_by_ext is not None:
@@ -305,6 +309,9 @@ def _ensure_player(row) -> Player | None:
     pfr = str(row.get("pfr_id") or "").strip()
     if pfr and not player.pfr_id:
         player.pfr_id = pfr
+    espn = str(row.get("espn_id") or "").strip()
+    if espn and not player.espn_id:
+        player.espn_id = espn
     return player
 
 
@@ -487,8 +494,93 @@ def sync_snap_counts(season: int) -> dict:
         db.session.rollback(); clear_raw_cache(); clear_player_index(); _finish(run, source, read, written, exc); raise
 
 
+# nflverse names four of the stat columns differently from the warehouse, which
+# follows the shape the ESPN boxscore cache established.
+_PLAYER_STAT_FIELDS = {
+    "completions": "completions",
+    "attempts": "attempts",
+    "passing_yards": "passing_yards",
+    "passing_tds": "passing_tds",
+    "interceptions": "passing_interceptions",
+    "sacks": "sacks_suffered",
+    "carries": "carries",
+    "rushing_yards": "rushing_yards",
+    "rushing_tds": "rushing_tds",
+    "receptions": "receptions",
+    "targets": "targets",
+    "receiving_yards": "receiving_yards",
+    "receiving_tds": "receiving_tds",
+    "fumbles_lost": "fumbles_lost_total",
+}
+
+
+def sync_player_stats(season: int) -> dict:
+    """Import weekly player lines, the one dataset the disk cache never covered.
+
+    player_game_stats has only ever been filled from the ESPN boxscore cache
+    under data/, which ships a single season. Rows already stored are left
+    alone, so ESPN stays authoritative wherever it has already written.
+    """
+    from db_models import PlayerGameStat
+
+    source = _source(); run = _start_run("player_stats", season)
+    prime_raw_cache(source, "player_game_stat"); prime_player_index()
+    rows = _load_nflreadpy("player_stats", season)
+    teams, games = _game_lookup(season)
+    read = written = skipped = unchanged = 0
+    existing = {
+        tuple(r) for r in db.session.execute(
+            db.select(PlayerGameStat.game_id, PlayerGameStat.player_id)
+            .join(Game, Game.id == PlayerGameStat.game_id)
+            .where(Game.season == season)
+        ).all()
+    }
+    pending: list[dict] = []
+    now = datetime.now(timezone.utc)
+
+    def _flush():
+        if pending:
+            db.session.bulk_insert_mappings(PlayerGameStat, pending); pending.clear()
+        db.session.commit()
+
+    try:
+        for row in rows:
+            read += 1
+            player = _ensure_player(row)
+            key = _snap_game_key(row)  # nflverse game ids share one format
+            game = _resolve_game(games, row, key[0], key[1], key[2]) if key else None
+            team = teams.get(_team(row.get("team")))
+            opponent = teams.get(_team(row.get("opponent_team")))
+            if not player or not game or not team or not opponent:
+                skipped += 1; continue
+            if (game.id, player.id) in existing:
+                unchanged += 1; continue
+            existing.add((game.id, player.id))
+            mapping = {
+                "game_id": game.id, "player_id": player.id, "team_id": team.id,
+                "opponent_id": opponent.id, "position": row.get("position"),
+                # key[2] is the home side of the nflverse game id.
+                "home": team.abbreviation == key[2],
+                "created_at": now, "updated_at": now,
+            }
+            for column, field in _PLAYER_STAT_FIELDS.items():
+                mapping[column] = _float(row.get(field)) or 0
+            pending.append(mapping)
+            capture_raw(source, "player_game_stat", f"{game.external_id}:{player.external_id}",
+                        row, season=season, week=_int(row.get("week")))
+            written += 1
+            if len(pending) >= 20000:
+                _flush()
+        _flush(); _finish(run, source, read, written); clear_raw_cache(); clear_player_index()
+        return {"dataset": "player_stats", "season": season, "read": read,
+                "written": written, "unchanged": unchanged, "skipped": skipped}
+    except Exception as exc:
+        db.session.rollback(); clear_raw_cache(); clear_player_index()
+        _finish(run, source, read, written, exc); raise
+
+
 def sync_external(season: int, datasets: list[str]) -> dict:
-    funcs = {"pbp": sync_pbp, "rosters": sync_rosters, "injuries": sync_injuries, "depth_charts": sync_depth_charts, "snap_counts": sync_snap_counts}
+    funcs = {"pbp": sync_pbp, "rosters": sync_rosters, "injuries": sync_injuries, "depth_charts": sync_depth_charts, "snap_counts": sync_snap_counts, "player_stats": sync_player_stats}
     result = {}
     for dataset in datasets:
         if dataset not in funcs: raise ValueError(f"unsupported dataset: {dataset}")
