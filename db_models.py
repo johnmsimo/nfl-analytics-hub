@@ -86,6 +86,9 @@ class Player(TimestampMixin, db.Model):
     __tablename__ = "players"
     id = db.Column(db.Integer, primary_key=True)
     external_id = db.Column(db.String(40), nullable=False, unique=True, index=True)
+    # Pro-Football-Reference id, published by the roster feed and the only
+    # identifier the snap-count feed carries.
+    pfr_id = db.Column(db.String(20), unique=True, index=True)
     full_name = db.Column(db.String(140), nullable=False, index=True)
     first_name = db.Column(db.String(70))
     last_name = db.Column(db.String(70), index=True)
@@ -759,7 +762,7 @@ class InjuryReport(TimestampMixin, db.Model):
     team_id = db.Column(db.Integer, db.ForeignKey("teams.id"), nullable=False)
     season = db.Column(db.Integer, db.ForeignKey("seasons.year"), nullable=False)
     week = db.Column(db.Integer, nullable=False)
-    report_date = db.Column(db.Date, nullable=False)
+    report_date = db.Column(db.Date)
     game_status = db.Column(db.String(40), index=True)
     practice_status = db.Column(db.String(40), index=True)
     primary_injury = db.Column(db.String(120), index=True)
@@ -767,7 +770,7 @@ class InjuryReport(TimestampMixin, db.Model):
     source_key = db.Column(db.String(80), nullable=False, default="nflverse")
     raw_payload = db.Column(db.JSON)
     __table_args__ = (
-        db.UniqueConstraint("player_id", "team_id", "season", "week", "report_date", name="uq_injury_report"),
+        db.UniqueConstraint("player_id", "team_id", "season", "week", name="uq_injury_report"),
         db.Index("ix_injury_current", "season", "week", "team_id", "game_status"),
     )
 
@@ -779,7 +782,9 @@ class DepthChartEntry(TimestampMixin, db.Model):
     team_id = db.Column(db.Integer, db.ForeignKey("teams.id"), nullable=False)
     season = db.Column(db.Integer, db.ForeignKey("seasons.year"), nullable=False)
     week = db.Column(db.Integer)
-    chart_date = db.Column(db.Date, nullable=False)
+    # Weekly charts (through 2024) carry no date; dated snapshots (2025+) carry
+    # no week. Both grains live here, so neither column can be required.
+    chart_date = db.Column(db.Date)
     position = db.Column(db.String(16), index=True)
     depth_position = db.Column(db.String(24), index=True)
     depth_rank = db.Column(db.Integer, index=True)
@@ -787,7 +792,8 @@ class DepthChartEntry(TimestampMixin, db.Model):
     raw_payload = db.Column(db.JSON)
     __table_args__ = (
         db.UniqueConstraint(
-            "player_id", "team_id", "chart_date", "depth_position", name="uq_depth_chart_entry"
+            "player_id", "team_id", "season", "week", "chart_date", "depth_position",
+            name="uq_depth_chart_entry",
         ),
         db.Index("ix_depth_chart_current", "season", "week", "team_id", "depth_position", "depth_rank"),
     )

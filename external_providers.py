@@ -10,6 +10,7 @@ import csv
 import gzip
 import io
 import os
+import re
 from datetime import date, datetime, timezone
 from typing import Iterable
 
@@ -18,7 +19,7 @@ import requests
 from database import db
 from db_models import (DataSource, DataSyncRun, DepthChartEntry, Game, InjuryReport,
                        Player, PlayerTeamSeason, Season, SnapCount, Team)
-from source_registry import capture_raw, register_source
+from source_registry import capture_raw, clear_raw_cache, prime_raw_cache, register_source
 from team_identity import normalize_team
 
 NFLVERSE_BASE = "https://github.com/nflverse/nflverse-data/releases/download"
@@ -102,8 +103,14 @@ def _game_lookup(season: int):
     for g in games:
         home = db.session.get(Team, g.home_team_id)
         away = db.session.get(Team, g.away_team_id)
-        if home and away:
-            by_matchup[(g.week, away.abbreviation, home.abbreviation)] = g
+        if not home or not away:
+            continue
+        by_matchup[(g.week, away.abbreviation, home.abbreviation)] = g
+        # nflverse numbers the postseason continuously (19, 20, 21, ...) while
+        # the schedule stores POST weeks 1-5. Postseason matchups are unique, so
+        # register a week-agnostic key the callers fall back to.
+        if g.season_type == "POST":
+            by_matchup[(None, away.abbreviation, home.abbreviation)] = g
     return teams, by_matchup
 
 
@@ -118,7 +125,8 @@ def sync_pbp(season: int) -> dict:
         for row in _download_csv(url):
             read += 1
             week = _int(row.get("week"))
-            game = games.get((week, _team(row.get("away_team")), _team(row.get("home_team"))))
+            away_abbr, home_abbr = _team(row.get("away_team")), _team(row.get("home_team"))
+            game = games.get((week, away_abbr, home_abbr)) or games.get((None, away_abbr, home_abbr))
             play_id = str(row.get("play_id") or "")
             if not game or not play_id:
                 skipped += 1; continue
@@ -168,7 +176,34 @@ def _load_nflreadpy(dataset: str, season: int):
         "snap_counts": nfl.load_snap_counts,
     }[dataset]
     frame = fn([season])
+    # Materializing a whole season at once costs roughly a gigabyte for depth
+    # charts. Yield slices instead; every caller iterates exactly once.
+    if hasattr(frame, "iter_slices"):
+        return _iter_frame_rows(frame)
     return frame.to_dicts() if hasattr(frame, "to_dicts") else frame.to_dict("records")
+
+
+def _iter_frame_rows(frame, chunk: int = 20000):
+    for slice_ in frame.iter_slices(chunk):
+        yield from slice_.to_dicts()
+
+
+# _ensure_player runs once per source row; a season of depth charts is half a
+# million of them. Priming this index replaces the per-row lookup with a dict
+# hit. Entries are live session objects, so writes through them still flush.
+_players_by_ext: dict[str, Player] | None = None
+
+
+def prime_player_index() -> int:
+    """Load every player once so bulk imports stop querying per row."""
+    global _players_by_ext
+    _players_by_ext = {p.external_id: p for p in db.session.scalars(db.select(Player)).all()}
+    return len(_players_by_ext)
+
+
+def clear_player_index() -> None:
+    global _players_by_ext
+    _players_by_ext = None
 
 
 def _ensure_player(row) -> Player | None:
@@ -176,16 +211,31 @@ def _ensure_player(row) -> Player | None:
     name = str(row.get("full_name") or row.get("player_name") or row.get("name") or "").strip()
     if not ext or not name:
         return None
-    player = db.session.scalar(db.select(Player).where(Player.external_id == ext))
+    if _players_by_ext is not None:
+        player = _players_by_ext.get(ext)
+    else:
+        player = db.session.scalar(db.select(Player).where(Player.external_id == ext))
     if not player:
         player = Player(external_id=ext, full_name=name)
         db.session.add(player); db.session.flush()
+        if _players_by_ext is not None:
+            _players_by_ext[ext] = player
     player.full_name = name; player.position = row.get("position") or player.position
+    pfr = str(row.get("pfr_id") or "").strip()
+    if pfr and not player.pfr_id:
+        player.pfr_id = pfr
     return player
 
 
+def _normalized_name(value) -> str:
+    """Fold a display name for cross-source matching (punctuation, suffixes)."""
+    text = re.sub(r"[.'\u2019-]", "", str(value or "").lower().strip())
+    text = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", text)
+    return re.sub(r"\s+", " ", text)
+
+
 def sync_rosters(season: int) -> dict:
-    source = _source(); run = _start_run("rosters", season); rows = _load_nflreadpy("rosters", season)
+    source = _source(); run = _start_run("rosters", season); prime_raw_cache(source, "roster"); prime_player_index(); rows = _load_nflreadpy("rosters", season)
     teams = {t.abbreviation: t for t in db.session.scalars(db.select(Team)).all()}; read = written = 0
     try:
         if not db.session.get(Season, season): db.session.add(Season(year=season))
@@ -198,62 +248,162 @@ def sync_rosters(season: int) -> dict:
             link.jersey_number = str(row.get("jersey_number") or "") or None; link.depth_position = row.get("depth_chart_position"); link.status = row.get("status")
             capture_raw(source, "roster", f"{season}:{team.abbreviation}:{player.external_id}:{row.get('week')}", row, season=season, week=_int(row.get("week")))
             written += 1
-        db.session.commit(); _finish(run, source, read, written); return {"dataset": "rosters", "season": season, "read": read, "written": written}
+        db.session.commit(); _finish(run, source, read, written); clear_raw_cache(); clear_player_index(); return {"dataset": "rosters", "season": season, "read": read, "written": written}
     except Exception as exc:
-        db.session.rollback(); _finish(run, source, read, written, exc); raise
+        db.session.rollback(); clear_raw_cache(); clear_player_index(); _finish(run, source, read, written, exc); raise
 
 
 def sync_injuries(season: int) -> dict:
-    source = _source(); run = _start_run("injuries", season); rows = _load_nflreadpy("injuries", season)
-    teams = {t.abbreviation: t for t in db.session.scalars(db.select(Team)).all()}; read = written = 0
+    """Weekly injury reports.
+
+    The feed publishes no report date, so the grain is one row per player, per
+    team, per week. Injury descriptions arrive split across a game-report set
+    (report_*) and a practice-report set (practice_*); the game report wins and
+    the practice report fills in when a player carries no game designation.
+    """
+    source = _source(); run = _start_run("injuries", season); prime_raw_cache(source, "injury"); prime_player_index(); rows = _load_nflreadpy("injuries", season)
+    teams = {t.abbreviation: t for t in db.session.scalars(db.select(Team)).all()}
+    read = written = skipped = 0
     try:
         for row in rows:
-            read += 1; player = _ensure_player(row); team = teams.get(_team(row.get("team"))); report_date = _date(row.get("report_date") or row.get("date_modified") or row.get("date"))
-            week = _int(row.get("week"))
-            if not player or not team or not report_date or week is None: continue
-            item = db.session.scalar(db.select(InjuryReport).where(InjuryReport.player_id == player.id, InjuryReport.team_id == team.id, InjuryReport.season == season, InjuryReport.week == week, InjuryReport.report_date == report_date))
-            if not item: item = InjuryReport(player_id=player.id, team_id=team.id, season=season, week=week, report_date=report_date); db.session.add(item)
-            item.game_status = row.get("report_status") or row.get("game_status"); item.practice_status = row.get("practice_status"); item.primary_injury = row.get("primary_injury") or row.get("injury"); item.secondary_injury = row.get("secondary_injury"); item.raw_payload = row
-            capture_raw(source, "injury", f"{season}:{week}:{team.abbreviation}:{player.external_id}:{report_date}", row, season=season, week=week); written += 1
-        db.session.commit(); _finish(run, source, read, written); return {"dataset": "injuries", "season": season, "read": read, "written": written}
+            read += 1
+            player = _ensure_player(row); team = teams.get(_team(row.get("team"))); week = _int(row.get("week"))
+            if not player or not team or week is None:
+                skipped += 1; continue
+            item = db.session.scalar(db.select(InjuryReport).where(InjuryReport.player_id == player.id, InjuryReport.team_id == team.id, InjuryReport.season == season, InjuryReport.week == week))
+            if not item:
+                item = InjuryReport(player_id=player.id, team_id=team.id, season=season, week=week); db.session.add(item)
+            item.report_date = _date(row.get("date_modified") or row.get("report_date"))
+            item.game_status = row.get("report_status") or row.get("game_status")
+            item.practice_status = row.get("practice_status")
+            item.primary_injury = row.get("report_primary_injury") or row.get("practice_primary_injury") or row.get("primary_injury")
+            item.secondary_injury = row.get("report_secondary_injury") or row.get("practice_secondary_injury") or row.get("secondary_injury")
+            item.raw_payload = row
+            capture_raw(source, "injury", f"{season}:{week}:{team.abbreviation}:{player.external_id}", row, season=season, week=week)
+            written += 1
+        db.session.commit(); _finish(run, source, read, written); clear_raw_cache(); clear_player_index()
+        return {"dataset": "injuries", "season": season, "read": read, "written": written, "skipped": skipped}
     except Exception as exc:
-        db.session.rollback(); _finish(run, source, read, written, exc); raise
+        db.session.rollback(); clear_raw_cache(); clear_player_index(); _finish(run, source, read, written, exc); raise
 
 
 def sync_depth_charts(season: int) -> dict:
-    source = _source(); run = _start_run("depth_charts", season); rows = _load_nflreadpy("depth_charts", season)
-    teams = {t.abbreviation: t for t in db.session.scalars(db.select(Team)).all()}; read = written = 0
+    source = _source(); run = _start_run("depth_charts", season); prime_raw_cache(source, "depth_chart"); prime_player_index(); rows = _load_nflreadpy("depth_charts", season)
+    teams = {t.abbreviation: t for t in db.session.scalars(db.select(Team)).all()}
+    read = written = skipped = unchanged = 0
+    # A season is ~550k rows. Hold only the natural keys already stored, never
+    # the mapped objects, and insert new rows in bounded batches so the session
+    # identity map cannot grow with the feed.
+    existing = {
+        tuple(r) for r in db.session.execute(
+            db.select(DepthChartEntry.player_id, DepthChartEntry.team_id,
+                      DepthChartEntry.week, DepthChartEntry.chart_date,
+                      DepthChartEntry.depth_position)
+            .where(DepthChartEntry.season == season)
+        ).all()
+    }
+    pending: list[dict] = []
+    now = datetime.now(timezone.utc)
+
+    def _flush_pending():
+        if pending:
+            db.session.bulk_insert_mappings(DepthChartEntry, pending)
+            pending.clear()
+        db.session.commit()
+
     try:
         for row in rows:
-            read += 1; player = _ensure_player(row); team = teams.get(_team(row.get("team"))); chart_date = _date(row.get("dt") or row.get("date") or row.get("chart_date"))
-            if not player or not team or not chart_date: continue
+            read += 1; player = _ensure_player(row)
+            # Weekly charts name the club `club_code`; dated snapshots use `team`.
+            team = teams.get(_team(row.get("team") or row.get("club_code")))
+            chart_date = _date(row.get("dt") or row.get("date") or row.get("chart_date"))
+            week = _int(row.get("week"))
+            # One of the two grains must identify the row.
+            if not player or not team or (chart_date is None and week is None):
+                skipped += 1; continue
             depth_pos = row.get("pos_abb") or row.get("depth_position") or row.get("position")
-            item = db.session.scalar(db.select(DepthChartEntry).where(DepthChartEntry.player_id == player.id, DepthChartEntry.team_id == team.id, DepthChartEntry.chart_date == chart_date, DepthChartEntry.depth_position == depth_pos))
-            if not item: item = DepthChartEntry(player_id=player.id, team_id=team.id, season=season, chart_date=chart_date, depth_position=depth_pos); db.session.add(item)
-            item.week = _int(row.get("week")); item.position = row.get("position"); item.depth_rank = _int(row.get("pos_rank") or row.get("depth_rank")); item.raw_payload = row
-            capture_raw(source, "depth_chart", f"{team.abbreviation}:{player.external_id}:{chart_date}:{depth_pos}", row, season=season, week=item.week); written += 1
-        db.session.commit(); _finish(run, source, read, written); return {"dataset": "depth_charts", "season": season, "read": read, "written": written}
+            entry_key = (player.id, team.id, week, chart_date, depth_pos)
+            # Dated snapshots are append-only: a key already stored is the same
+            # observation, so re-runs skip it instead of rewriting the row.
+            if entry_key in existing:
+                unchanged += 1; continue
+            existing.add(entry_key)
+            pending.append({
+                "player_id": player.id, "team_id": team.id, "season": season,
+                "week": week, "chart_date": chart_date, "position": row.get("position"),
+                "depth_position": depth_pos,
+                # `pos_rank` on dated snapshots, `depth_team` on weekly charts.
+                "depth_rank": _int(row.get("pos_rank") or row.get("depth_rank") or row.get("depth_team")),
+                "source_key": "nflverse", "raw_payload": row,
+                "created_at": now, "updated_at": now,
+            })
+            capture_raw(source, "depth_chart", f"{team.abbreviation}:{player.external_id}:{chart_date}:{depth_pos}", row, season=season, week=week); written += 1
+            if len(pending) >= 20000:
+                _flush_pending()
+        _flush_pending(); _finish(run, source, read, written); clear_raw_cache(); clear_player_index()
+        return {"dataset": "depth_charts", "season": season, "read": read, "written": written, "skipped": skipped, "unchanged": unchanged}
     except Exception as exc:
-        db.session.rollback(); _finish(run, source, read, written, exc); raise
+        db.session.rollback(); clear_raw_cache(); clear_player_index(); _finish(run, source, read, written, exc); raise
+
+
+def _snap_player_index() -> tuple[dict, dict]:
+    """Resolve snap-count rows onto players loaded from the roster feed.
+
+    Snap counts identify players only by Pro-Football-Reference id, so match on
+    players.pfr_id first and fall back to a folded name plus current team. The
+    residue is players whose team changed mid-season; they are skipped rather
+    than matched on name alone, which would collide across the league.
+    """
+    by_pfr, by_name = {}, {}
+    rows = db.session.execute(
+        db.select(Player.id, Player.pfr_id, Player.full_name, Team.abbreviation)
+        .select_from(Player)
+        .join(PlayerTeamSeason, PlayerTeamSeason.player_id == Player.id)
+        .join(Team, Team.id == PlayerTeamSeason.team_id)
+    ).all()
+    for player_id, pfr_id, full_name, abbr in rows:
+        if pfr_id:
+            by_pfr.setdefault(pfr_id, player_id)
+        by_name.setdefault((_normalized_name(full_name), abbr), player_id)
+    return by_pfr, by_name
+
+
+def _snap_game_key(row) -> tuple | None:
+    """nflverse game ids read {season}_{week}_{away}_{home}; the feed has no
+    home/away flag of its own."""
+    parts = str(row.get("game_id") or "").split("_")
+    if len(parts) != 4:
+        return None
+    week = _int(parts[1])
+    return None if week is None else (week, _team(parts[2]), _team(parts[3]))
 
 
 def sync_snap_counts(season: int) -> dict:
-    source = _source(); run = _start_run("snap_counts", season); rows = _load_nflreadpy("snap_counts", season)
-    teams, games = _game_lookup(season); read = written = 0
+    source = _source(); run = _start_run("snap_counts", season); prime_raw_cache(source, "snap_count"); rows = _load_nflreadpy("snap_counts", season)
+    teams, games = _game_lookup(season); read = written = skipped = 0
+    by_pfr, by_name = _snap_player_index()
     try:
         for row in rows:
-            read += 1; player = _ensure_player(row); team = teams.get(_team(row.get("team"))); week = _int(row.get("week"))
-            game = games.get((week, _team(row.get("opponent") if row.get("location") == "Home" else row.get("team")), _team(row.get("team") if row.get("location") == "Home" else row.get("opponent"))))
-            if not player or not team or not game or week is None: continue
+            read += 1
+            team = teams.get(_team(row.get("team"))); week = _int(row.get("week"))
+            key = _snap_game_key(row)
+            game = games.get(key) or (games.get((None, key[1], key[2])) if key else None)
+            player_id = by_pfr.get(str(row.get("pfr_player_id") or "").strip())
+            if player_id is None and team is not None:
+                player_id = by_name.get((_normalized_name(row.get("player")), team.abbreviation))
+            player = db.session.get(Player, player_id) if player_id else None
+            if not player or not team or not game or week is None:
+                skipped += 1; continue
             item = db.session.scalar(db.select(SnapCount).where(SnapCount.game_id == game.id, SnapCount.player_id == player.id))
             if not item: item = SnapCount(game_id=game.id, player_id=player.id, team_id=team.id, season=season, week=week); db.session.add(item)
             item.offense_snaps = _int(row.get("offense_snaps")) or 0; item.offense_pct = _float(row.get("offense_pct"))
             item.defense_snaps = _int(row.get("defense_snaps")) or 0; item.defense_pct = _float(row.get("defense_pct"))
             item.special_teams_snaps = _int(row.get("st_snaps") or row.get("special_teams_snaps")) or 0; item.special_teams_pct = _float(row.get("st_pct") or row.get("special_teams_pct")); item.raw_payload = row
             capture_raw(source, "snap_count", f"{game.external_id}:{player.external_id}", row, season=season, week=week); written += 1
-        db.session.commit(); _finish(run, source, read, written); return {"dataset": "snap_counts", "season": season, "read": read, "written": written}
+        db.session.commit(); _finish(run, source, read, written); clear_raw_cache(); clear_player_index()
+        return {"dataset": "snap_counts", "season": season, "read": read, "written": written, "skipped": skipped}
     except Exception as exc:
-        db.session.rollback(); _finish(run, source, read, written, exc); raise
+        db.session.rollback(); clear_raw_cache(); clear_player_index(); _finish(run, source, read, written, exc); raise
 
 
 def sync_external(season: int, datasets: list[str]) -> dict:
