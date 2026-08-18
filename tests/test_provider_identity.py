@@ -260,3 +260,36 @@ def test_boxscore_cache_resolves_onto_the_nflverse_player(app_fixture):
         assert found is not None and found.id == nflverse.id, (
             "the cache importer looks players up by espn_id before minting a row"
         )
+
+
+def test_admin_external_sync_exposes_every_public_dataset(client):
+    """A dataset the importer supports but the admin API rejects is unreachable.
+
+    Asking for a nonsense dataset makes the endpoint report its allowlist, so
+    this reads the real contract without triggering a sync.
+    """
+    import historical_backfill as hb
+
+    resp = client.post("/api/admin/external-sync?season=2025&datasets=not-a-dataset")
+    assert resp.status_code == 400
+    allowed = set(resp.get_json()["allowed"])
+    missing = set(hb.PUBLIC_DATASETS) - allowed
+    assert not missing, f"admin API cannot trigger: {missing}"
+
+
+def test_backfill_defaults_exclude_play_by_play():
+    """pbp peaks near 1.3 GB, above the production web machine's 1 GB."""
+    import historical_backfill as hb
+
+    assert "pbp" not in hb.PUBLIC_DATASETS
+    assert "player_stats" in hb.PUBLIC_DATASETS
+
+
+def test_backfill_skips_seasons_that_are_already_loaded(app_fixture):
+    """--skip-existing makes the backfill resumable after an interruption."""
+    import historical_backfill as hb
+
+    with app_fixture.app_context():
+        # conftest seeds 2025 from the committed player-week cache.
+        assert hb._already_loaded(2025) is True
+        assert hb._already_loaded(1999) is False

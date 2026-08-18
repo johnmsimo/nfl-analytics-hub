@@ -108,8 +108,10 @@ def external_sync():
     season = request.args.get("season", type=int)
     if not season:
         return jsonify({"error": "season_required"}), 400
-    datasets = [x.strip() for x in request.args.get("datasets", "pbp,rosters,injuries,depth_charts,snap_counts").split(",") if x.strip()]
-    allowed = {"pbp", "rosters", "injuries", "depth_charts", "snap_counts"}
+    datasets = [x.strip() for x in request.args.get("datasets", "rosters,injuries,depth_charts,snap_counts,player_stats").split(",") if x.strip()]
+    # Play-by-play stays out of the default: it is the heaviest feed by an order
+    # of magnitude and has to be asked for deliberately.
+    allowed = {"pbp", "rosters", "injuries", "depth_charts", "snap_counts", "player_stats"}
     if not datasets or any(x not in allowed for x in datasets):
         return jsonify({"error": "invalid_datasets", "allowed": sorted(allowed)}), 400
     result = sync_external(season, datasets)
