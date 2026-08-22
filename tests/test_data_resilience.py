@@ -5,6 +5,7 @@ import nfl_data
 
 def test_schedule_refresh_uses_stale_snapshot_when_provider_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(nfl_data, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(nfl_data, "SEED_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(nfl_data, "_mem", {})
     cached_games = [
         {
@@ -29,6 +30,7 @@ def test_schedule_refresh_uses_stale_snapshot_when_provider_fails(tmp_path, monk
 
 def test_schedule_provider_failure_without_snapshot_is_degraded(tmp_path, monkeypatch):
     monkeypatch.setattr(nfl_data, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(nfl_data, "SEED_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(nfl_data, "_mem", {})
 
     def unavailable(*_args, **_kwargs):

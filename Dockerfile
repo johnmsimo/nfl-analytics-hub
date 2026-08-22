@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PORT=8080 \
-    DATA_DIR=/app/data
+    DATA_DIR=/app/data \
+    SEED_DATA_DIR=/app/seed-data
 
 RUN addgroup --system app && adduser --system --ingroup app app
 
@@ -13,7 +14,11 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app . .
-RUN mkdir -p /app/data && chown -R app:app /app
+RUN mkdir -p /app/seed-data \
+    && cp -a /app/data/. /app/seed-data/ \
+    && rm -rf /app/data \
+    && mkdir -p /app/data \
+    && chown -R app:app /app
 
 USER app
 EXPOSE 8080

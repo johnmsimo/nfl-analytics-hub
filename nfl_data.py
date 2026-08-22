@@ -32,16 +32,25 @@ import http_client
 
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
 
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = (
     os.environ.get("NFL_DATA_DIR")
     or os.environ.get("DATA_DIR")
-    or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    or os.path.join(_APP_DIR, "data")
+)
+SEED_DATA_DIR = (
+    os.environ.get("NFL_SEED_DATA_DIR")
+    or os.environ.get("SEED_DATA_DIR")
+    or os.path.join(_APP_DIR, "data")
 )
 os.makedirs(DATA_DIR, exist_ok=True)
 
 _lock = threading.RLock()
 _mem: dict = {}          # key -> (expires_epoch, value)
 
+# ESPN labels the Hall of Fame game as preseason week 1. The app exposes it
+# as week 0, followed by the three standard preseason weeks.
+PRE_SOURCE_WEEKS = list(range(1, 5))
 REG_WEEKS = list(range(1, 19))
 POST_WEEKS = list(range(1, 6))   # WC, DIV, CONF, (pro bowl slot unused), SB
 
@@ -96,12 +105,43 @@ def _disk_path(name: str) -> str:
     return os.path.join(DATA_DIR, name)
 
 
-def _read_json(name: str):
+def _read_json_from(directory: str, name: str):
     try:
-        with open(_disk_path(name), "r", encoding="utf-8") as f:
+        with open(os.path.join(directory, name), "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _read_json(name: str):
+    """Read runtime data with the immutable image seed as a fallback.
+
+    Schedule snapshots are merged by game id. This keeps newer runtime status
+    updates while ensuring an older Fly volume cannot hide newly bundled games.
+    """
+    runtime = _read_json_from(DATA_DIR, name)
+    if os.path.abspath(DATA_DIR) == os.path.abspath(SEED_DATA_DIR):
+        return runtime
+
+    seed = _read_json_from(SEED_DATA_DIR, name)
+    if not name.startswith("schedule_"):
+        return runtime if runtime is not None else seed
+    if not isinstance(runtime, dict):
+        return seed
+    if not isinstance(seed, dict):
+        return runtime
+
+    merged: dict[str, dict] = {}
+    for payload in (seed, runtime):
+        for game in payload.get("games", []):
+            game_id = str(game.get("game_id") or "")
+            if game_id:
+                merged[game_id] = game
+    games = sorted(merged.values(), key=lambda game: (game.get("date") or "", str(game.get("game_id") or "")))
+    return {
+        "fetched_at": max(seed.get("fetched_at", 0), runtime.get("fetched_at", 0)),
+        "games": games,
+    }
 
 
 def _write_json(name: str, obj) -> None:
@@ -158,14 +198,18 @@ def fetch_week_scoreboard(season: int, week: int, seasontype: int = 2,
         return hit
     url = f"{ESPN_BASE}/scoreboard?dates={season}&seasontype={seasontype}&week={week}"
     data = _get_json(url)
-    stype = "REG" if seasontype == 2 else "POST"
-    games = [_parse_event(ev, season, week, stype) for ev in data.get("events", [])]
+    season_types = {1: "PRE", 2: "REG", 3: "POST"}
+    if seasontype not in season_types:
+        raise ValueError(f"Unsupported ESPN season type: {seasontype}")
+    stype = season_types[seasontype]
+    display_week = week - 1 if seasontype == 1 else week
+    games = [_parse_event(ev, season, display_week, stype) for ev in data.get("events", [])]
     _mem_set(key, games, ttl)
     return games
 
 
 def get_schedule(season: int, refresh: bool = False) -> list[dict]:
-    """Full-season schedule (REG 1-18 + POST).
+    """Full-season schedule (PRE 0-3 + REG 1-18 + POST).
 
     A provider outage must not take the application down. If a refresh fails,
     the last valid disk snapshot is returned, even when it is stale. When no
@@ -187,6 +231,8 @@ def get_schedule(season: int, refresh: bool = False) -> list[dict]:
 
     games: list[dict] = []
     try:
+        for source_week in PRE_SOURCE_WEEKS:
+            games.extend(fetch_week_scoreboard(season, source_week, 1, ttl=1))
         for wk in REG_WEEKS:
             games.extend(fetch_week_scoreboard(season, wk, 2, ttl=1))
         for wk in POST_WEEKS:
@@ -204,6 +250,7 @@ def get_schedule(season: int, refresh: bool = False) -> list[dict]:
         _mem_set(key, [], 60)
         return []
 
+    games.sort(key=lambda game: (game.get("date") or "", str(game.get("game_id") or "")))
     _write_json(f"schedule_{season}.json", {"fetched_at": time.time(), "games": games})
     _mem_set(key, games, 300)
     return games
@@ -238,9 +285,64 @@ def current_week(season: int | None = None) -> dict:
 def get_week_games(season: int, week: int, season_type: str = "REG",
                    live: bool = False) -> list[dict]:
     if live:
-        return fetch_week_scoreboard(season, week, 2 if season_type == "REG" else 3)
+        if season_type == "PRE":
+            return fetch_week_scoreboard(season, week + 1, 1)
+        if season_type == "REG":
+            return fetch_week_scoreboard(season, week, 2)
+        if season_type == "POST":
+            return fetch_week_scoreboard(season, week, 3)
+        raise ValueError(f"Unsupported season type: {season_type}")
     return [g for g in get_schedule(season)
             if g["week"] == week and g["season_type"] == season_type]
+
+
+def schedule_status(season: int | None = None, now: datetime | None = None) -> dict:
+    """Return a provider-independent schedule readiness snapshot."""
+    checked_at = now or datetime.now(timezone.utc)
+    season = season or default_season(checked_at)
+    payload = _read_json(f"schedule_{season}.json")
+    games = payload.get("games", []) if isinstance(payload, dict) else []
+
+    counts = {"PRE": 0, "REG": 0, "POST": 0}
+    for game in games:
+        season_type = game.get("season_type")
+        if season_type in counts:
+            counts[season_type] += 1
+
+    required = {"REG": 272}
+    if season == 2026:
+        required.update({"PRE": 49, "POST": 13})
+    issues = [
+        f"{season_type} schedule has {counts[season_type]} of {minimum} required games"
+        for season_type, minimum in required.items()
+        if counts[season_type] < minimum
+    ]
+
+    current = None
+    for game in games:
+        if not game.get("completed"):
+            current = {
+                "season": season,
+                "week": game.get("week"),
+                "season_type": game.get("season_type"),
+            }
+            break
+    if current is None and games:
+        last = games[-1]
+        current = {
+            "season": season,
+            "week": last.get("week"),
+            "season_type": last.get("season_type"),
+        }
+
+    return {
+        "season": season,
+        "ready": not issues,
+        "total_games": len(games),
+        "counts": counts,
+        "current_week": current,
+        "issues": issues,
+    }
 
 
 # ------------------------------------------------------------------ positions

@@ -35,7 +35,7 @@
   }
 
   /* ---------------- week state (persists across pages) ---------------- */
-  const WK = 'nfl.week';
+  const WK = 'nfl.week.v2';
   function getWeek() { try { return JSON.parse(localStorage.getItem(WK)) || null; } catch { return null; } }
   function setWeek(w) { localStorage.setItem(WK, JSON.stringify(w)); renderWeekChip(w); }
   async function resolveWeek() {
@@ -48,7 +48,11 @@
   }
   function renderWeekChip(w) {
     const el = $('#weekchip');
-    if (el && w) el.innerHTML = `<b>${w.season}</b> · ${w.type === 'POST' ? 'PO' : 'WK'} <b>${w.week}</b>`;
+    if (!el || !w) return;
+    let label = `WK <b>${w.week}</b>`;
+    if (w.type === 'POST') label = `PO <b>${w.week}</b>`;
+    if (w.type === 'PRE') label = Number(w.week) === 0 ? 'HOF' : `PRE <b>${w.week}</b>`;
+    el.innerHTML = `<b>${w.season}</b> · ${label}`;
   }
 
   /* ------------------------------ slip ------------------------------- */
@@ -235,6 +239,7 @@
     container.innerHTML = `
       <select id="wc-season"></select>
       <div class="seg" id="wc-type">
+        <button data-v="PRE" class="${w.type === 'PRE' ? 'on' : ''}">PRE</button>
         <button data-v="REG" class="${w.type === 'REG' ? 'on' : ''}">REG</button>
         <button data-v="POST" class="${w.type === 'POST' ? 'on' : ''}">PO</button>
       </div>
@@ -242,8 +247,15 @@
     const seasons = [w.season - 1, w.season, w.season + 1].filter(v => v >= 2022);
     $('#wc-season', container).innerHTML = seasons.map(v => `<option ${v === w.season ? 'selected' : ''}>${v}</option>`).join('');
     const fillWeeks = (type, sel) => {
-      const ws = type === 'POST' ? [1, 2, 3, 4, 5] : Array.from({ length: 18 }, (_, i) => i + 1);
-      $('#wc-week', container).innerHTML = ws.map(v => `<option ${v == sel ? 'selected' : ''}>${v}</option>`).join('');
+      const ws = type === 'PRE'
+        ? [0, 1, 2, 3]
+        : type === 'POST'
+          ? [1, 2, 3, 4, 5]
+          : Array.from({ length: 18 }, (_, i) => i + 1);
+      $('#wc-week', container).innerHTML = ws.map(v => {
+        const label = type === 'PRE' ? (v === 0 ? 'HOF' : `PRE ${v}`) : v;
+        return `<option value="${v}" ${v == sel ? 'selected' : ''}>${label}</option>`;
+      }).join('');
     };
     fillWeeks(w.type, w.week);
     const current = () => ({
@@ -257,7 +269,7 @@
     container.querySelectorAll('#wc-type button').forEach(b => b.onclick = () => {
       container.querySelectorAll('#wc-type button').forEach(x => x.classList.remove('on'));
       b.classList.add('on');
-      fillWeeks(b.dataset.v, 1);
+      fillWeeks(b.dataset.v, b.dataset.v === 'PRE' ? 0 : 1);
       fire();
     });
     onLoad(w);
