@@ -64,7 +64,11 @@ def run_job(app, key):
             db.session.commit()
         try:
             if key == "cached-data-sync":
-                sync_cached_data(os.environ.get("NFL_DATA_DIR") or os.path.join(app.root_path, "data"))
+                sync_cached_data(
+                    os.environ.get("NFL_SEED_DATA_DIR")
+                    or os.environ.get("SEED_DATA_DIR")
+                    or os.path.join(app.root_path, "data")
+                )
             elif key == "analytics-rebuild":
                 rebuild_analytics(None)
                 rebuild_advanced_team_stats(None)
