@@ -51,6 +51,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m compileall -q .
+      - run: python scripts/validate_schedule.py data/schedule_2026.json
       - run: flask --app app db upgrade
       - run: pytest -q --cov=. --cov-report=term-missing --cov-fail-under=60
       - run: docker build -t nfl-analytics-hub:ci .
