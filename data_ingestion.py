@@ -65,7 +65,14 @@ def import_schedule(path: str | Path, source=None) -> dict:
     raw_written = 0
     for row in games:
         if source and row.get("game_id"):
-            raw_written += int(capture_raw(source, "game", str(row["game_id"]), row, season=int(row.get("season") or 0) or None, week=int(row.get("week") or 0) or None))
+            raw_written += int(capture_raw(
+                source,
+                "game",
+                str(row["game_id"]),
+                row,
+                season=int(row.get("season") or 0) or None,
+                week=int(row["week"]) if str(row.get("week", "")).strip() else None,
+            ))
         season_year = int(row["season"])
         season = db.session.get(Season, season_year)
         if not season:
