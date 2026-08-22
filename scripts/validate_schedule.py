@@ -43,7 +43,7 @@ def validate(path: Path) -> list[str]:
             errors.append(f"game {game_id} has season {game['season']}, expected 2026")
         if game["season_type"] not in EXPECTED_COUNTS:
             errors.append(f"game {game_id} has invalid season_type {game['season_type']}")
-        if game["home_team"] == game["away_team"]:
+        if game["home_team"] == game["away_team"] and game["home_team"] != "TBD":
             errors.append(f"game {game_id} has the same home and away team")
         try:
             datetime.fromisoformat(str(game["date"]).replace("Z", "+00:00"))
