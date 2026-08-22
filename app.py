@@ -188,17 +188,22 @@ def health():
 
 @app.route("/ready")
 def ready():
-    """Readiness probe: database can answer a trivial query."""
+    """Readiness probe: database and the active schedule are usable."""
     try:
         from sqlalchemy import text
 
         from database import db
 
         db.session.execute(text("SELECT 1"))
-        return jsonify({"ok": True, "database": "ready"})
     except Exception:
         app.logger.exception("Readiness database check failed")
         return jsonify({"ok": False, "database": "unavailable"}), 503
+
+    schedule = nfl_data.schedule_status()
+    if not schedule["ready"]:
+        app.logger.error("Readiness schedule check failed: %s", schedule["issues"])
+        return jsonify({"ok": False, "database": "ready", "schedule": schedule}), 503
+    return jsonify({"ok": True, "database": "ready", "schedule": schedule})
 
 
 @app.route("/metrics")
