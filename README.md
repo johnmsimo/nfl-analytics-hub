@@ -174,11 +174,39 @@ python sync_commercial.py --season 2026 --datasets coaches,transactions
 
 Required environment variables are documented in `.env.example`. The OpenWeather connector uses stadium latitude/longitude, The Odds API stores timestamped bookmaker/market/outcome snapshots, and SportsDataIO endpoint templates are configurable to match the feeds enabled on your subscription.
 
-Admin trigger:
+Admin triggers require an explicit dataset list:
 
 ```text
-POST /api/admin/commercial-sync?season=2026&week=1&datasets=weather,odds,coaches,transactions
+POST /api/admin/external-sync?season=2026&datasets=rosters
+POST /api/admin/commercial-sync?season=2026&week=1&datasets=weather
 ```
+
+### Scheduled provider cadences
+
+Provider automation is fail-closed at two levels. Set the family gate and only
+the individual datasets you intend to run; setting a family gate alone schedules
+nothing. Provider jobs are serialized so a large import cannot overlap another
+provider sync.
+
+| Dataset | Dataset gate | Default cadence |
+| --- | --- | --- |
+| Rosters | `ENABLE_EXTERNAL_ROSTERS_SYNC` | 6 hours |
+| Injuries | `ENABLE_EXTERNAL_INJURIES_SYNC` | 2 hours |
+| Depth charts | `ENABLE_EXTERNAL_DEPTH_CHARTS_SYNC` | 24 hours |
+| Play-by-play | `ENABLE_EXTERNAL_PBP_SYNC` | 6 hours |
+| Snap counts | `ENABLE_EXTERNAL_SNAP_COUNTS_SYNC` | 6 hours |
+| Player stats | `ENABLE_EXTERNAL_PLAYER_STATS_SYNC` | 6 hours |
+| Weather | `ENABLE_COMMERCIAL_WEATHER_SYNC` | 30 minutes |
+| Odds | `ENABLE_COMMERCIAL_ODDS_SYNC` | 10 minutes |
+| Live games | `ENABLE_COMMERCIAL_LIVE_GAMES_SYNC` | 2 minutes |
+| Coaches | `ENABLE_COMMERCIAL_COACHES_SYNC` | 24 hours |
+| Transactions | `ENABLE_COMMERCIAL_TRANSACTIONS_SYNC` | 1 hour |
+
+Public nflverse datasets also require `ENABLE_EXTERNAL_SYNC=true`; credentialed
+datasets require `ENABLE_COMMERCIAL_SYNC=true`. Every cadence can be overridden
+with the matching `*_INTERVAL_MINUTES` variable shown in `.env.example`.
+Weekly commercial jobs use `EXTERNAL_DATA_WEEK` when supplied and otherwise
+resolve the app's current NFL week.
 
 Because live feeds, official tracking data, Next Gen Stats, contracts, and redistribution rights depend on paid agreements, those datasets cannot be populated without the corresponding provider credentials and entitlements. The provider boundary and raw-provenance layer are ready for additional licensed adapters.
 
