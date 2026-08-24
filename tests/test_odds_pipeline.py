@@ -147,6 +147,8 @@ def test_game_odds_are_fetched_once_per_day(monkeypatch, tmp_path):
         return _Resp()
 
     monkeypatch.setenv("ODDS_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("ENABLED_PROVIDERS", "nflverse,nws,the-odds-api")
+    monkeypatch.setenv("ENABLE_ODDS_API", "true")
     monkeypatch.setattr(odds_api.http_client, "get", _fake_get)
     monkeypatch.setattr(odds_api, "_CACHE_FILE", str(tmp_path / "odds_cache.json"))
     monkeypatch.setattr(odds_api, "_snapshot", None)

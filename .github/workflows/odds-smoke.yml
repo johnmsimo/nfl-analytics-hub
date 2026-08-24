@@ -1,0 +1,49 @@
+name: Odds API Production Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_id:
+        description: Current NFL event ID from The Odds API dashboard (32 lowercase hex characters)
+        required: true
+        type: string
+      confirm_one_credit:
+        description: Confirm this run may spend at most one Odds API credit
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - SPEND_ONE_CREDIT
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odds-api-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: inputs.confirm_one_credit == 'SPEND_ONE_CREDIT'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      EVENT_ID: ${{ inputs.event_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Validate controls
+        shell: bash
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          [[ "$EVENT_ID" =~ ^[0-9a-f]{32}$ ]] || (echo "Event ID must be 32 lowercase hexadecimal characters" && exit 1)
+      - name: Run exactly one provider request
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "python scripts/smoke_odds_api.py --event-id $EVENT_ID --confirm-credit-cost 1"

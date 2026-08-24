@@ -7,8 +7,9 @@ credits), per-event prop fetches cached inside the snapshot, and an explicit
 `fetch_event_odds_live()` bypass used only by the tracker's closing-line
 capture around kickoff.
 
-Degrades gracefully: without ODDS_API_KEY every getter returns empty and the
-routes still 200.
+Degrades gracefully: the API key, canonical provider registration, and explicit
+runtime feature gate must all be present. Otherwise every getter returns empty
+and the routes still 200.
 """
 from __future__ import annotations
 
@@ -23,6 +24,8 @@ import nfl_data
 
 API_BASE = "https://api.the-odds-api.com/v4"
 SPORT = "americanfootball_nfl"
+PROVIDER_KEY = "the-odds-api"
+_TRUTHY = {"1", "true", "yes", "on"}
 
 GAME_MARKETS = "h2h,spreads,totals"
 PROP_MARKETS = [
@@ -48,8 +51,28 @@ def _api_key() -> str | None:
     return os.environ.get("ODDS_API_KEY") or None
 
 
-def is_configured() -> bool:
+def has_api_key() -> bool:
+    """Return key presence without exposing the credential."""
     return _api_key() is not None
+
+
+def provider_enabled() -> bool:
+    """Require the canonical integration registry key, never the old odds alias."""
+    providers = {
+        item.strip().lower()
+        for item in os.environ.get("ENABLED_PROVIDERS", "").split(",")
+        if item.strip()
+    }
+    return PROVIDER_KEY in providers
+
+
+def feature_enabled() -> bool:
+    """Explicit credit-spend gate shared by every Odds API runtime path."""
+    return os.environ.get("ENABLE_ODDS_API", "false").strip().lower() in _TRUTHY
+
+
+def is_configured() -> bool:
+    return has_api_key() and provider_enabled() and feature_enabled()
 
 
 def _today() -> str:
@@ -80,8 +103,10 @@ def _save_snapshot() -> None:
 
 
 def _get(path: str, **params):
+    if not is_configured():
+        return None
     key = _api_key()
-    if not key:
+    if not key:  # Defensive: is_configured() already requires this.
         return None
     params = {"apiKey": key, **params}
     response = http_client.get(f"{API_BASE}{path}", params=params)
@@ -271,6 +296,10 @@ def snapshot_status() -> dict:
     snap = _load_snapshot()
     blk = snap.get("game_odds") or {}
     return {
+        "provider_key": PROVIDER_KEY,
+        "key_configured": has_api_key(),
+        "provider_enabled": provider_enabled(),
+        "feature_enabled": feature_enabled(),
         "configured": is_configured(),
         "snapshot_date": blk.get("date"),
         "game_events": len(blk.get("events", [])),
