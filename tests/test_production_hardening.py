@@ -22,8 +22,8 @@ def test_explicit_schema_creation_override(monkeypatch):
 def test_optional_scheduler_jobs_are_disabled_by_default(monkeypatch):
     monkeypatch.delenv("ENABLE_EXTERNAL_SYNC", raising=False)
     monkeypatch.delenv("ENABLE_COMMERCIAL_SYNC", raising=False)
-    assert scheduled_jobs._job_enabled("external-data-sync") is False
-    assert scheduled_jobs._job_enabled("commercial-data-sync") is False
+    assert scheduled_jobs._job_enabled("external-rosters-sync") is False
+    assert scheduled_jobs._job_enabled("commercial-weather-sync") is False
     assert scheduled_jobs._job_enabled("cached-data-sync") is True
 
 
