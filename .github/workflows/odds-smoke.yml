@@ -1,6 +1,9 @@
 name: Odds API Production Smoke
 
 on:
+  push:
+    branches:
+      - codex/p1-2-one-credit-smoke-20260824
   workflow_dispatch:
     inputs:
       event_id:
@@ -25,13 +28,13 @@ concurrency:
 
 jobs:
   smoke:
-    if: inputs.confirm_one_credit == 'SPEND_ONE_CREDIT'
+    if: github.event_name == 'push' || inputs.confirm_one_credit == 'SPEND_ONE_CREDIT'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      EVENT_ID: ${{ inputs.event_id }}
+      EVENT_ID: ${{ github.event_name == 'push' && '8c94552d022acec4a0458d70c19d3da9' || inputs.event_id }}
     steps:
       - uses: actions/checkout@v4
         with:
