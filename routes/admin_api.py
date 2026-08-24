@@ -108,9 +108,11 @@ def external_sync():
     season = request.args.get("season", type=int)
     if not season:
         return jsonify({"error": "season_required"}), 400
-    datasets = [x.strip() for x in request.args.get("datasets", "pbp,rosters,injuries,depth_charts,snap_counts").split(",") if x.strip()]
-    allowed = {"pbp", "rosters", "injuries", "depth_charts", "snap_counts"}
-    if not datasets or any(x not in allowed for x in datasets):
+    datasets = [x.strip() for x in request.args.get("datasets", "").split(",") if x.strip()]
+    allowed = {"pbp", "rosters", "injuries", "depth_charts", "snap_counts", "player_stats"}
+    if not datasets:
+        return jsonify({"error": "datasets_required", "allowed": sorted(allowed)}), 400
+    if any(x not in allowed for x in datasets):
         return jsonify({"error": "invalid_datasets", "allowed": sorted(allowed)}), 400
     result = sync_external(season, datasets)
     if "pbp" in datasets:
@@ -126,9 +128,11 @@ def commercial_sync():
     if not season:
         return jsonify({"error": "season_required"}), 400
     week = request.args.get("week", type=int)
-    datasets = [x.strip() for x in request.args.get("datasets", "weather,odds,live_games,coaches,transactions").split(",") if x.strip()]
+    datasets = [x.strip() for x in request.args.get("datasets", "").split(",") if x.strip()]
     allowed = {"weather", "odds", "live_games", "coaches", "transactions"}
-    if not datasets or any(x not in allowed for x in datasets):
+    if not datasets:
+        return jsonify({"error": "datasets_required", "allowed": sorted(allowed)}), 400
+    if any(x not in allowed for x in datasets):
         return jsonify({"error": "invalid_datasets", "allowed": sorted(allowed)}), 400
     result = sync_commercial(season, datasets, week)
     _audit("commercial_data.sync", "season", season, {"datasets": datasets, "week": week})
