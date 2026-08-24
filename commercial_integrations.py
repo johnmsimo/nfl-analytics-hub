@@ -83,6 +83,9 @@ def sync_weather(season:int, week:int|None=None):
     except Exception as exc: db.session.rollback(); _finish(run,source,read,written,exc); raise
 
 def sync_odds(season:int, week:int|None=None):
+    import odds_api
+    if not odds_api.is_configured():
+        raise RuntimeError("Odds API runtime is disabled or incomplete")
     key=os.getenv("ODDS_API_KEY")
     if not key: raise RuntimeError("ODDS_API_KEY is required")
     url=os.getenv("ODDS_API_URL","https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds")

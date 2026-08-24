@@ -111,6 +111,38 @@ its identity, digest, timestamps, and audit evidence; it never hard-deletes ente
 
 Every response includes `X-Request-ID`. Incoming `X-Request-ID` values are preserved, which allows Fly proxy logs, application logs, and client reports to be correlated. Outbound provider calls record host-level success, failure, latency, and last-error telemetry in-process.
 
+## 5.1. Activate The Odds API with a one-credit smoke
+
+The canonical integration key is `the-odds-api`. Keep
+`ENABLE_ODDS_API=false` while installing or rotating `ODDS_API_KEY`; key
+presence alone must never enable provider traffic.
+
+After this change is merged and deployed, the production smoke can be run from
+GitHub Mobile or github.com without a terminal:
+
+1. In The Odds API dashboard, copy one current NFL event ID. It must be 32
+   lowercase hexadecimal characters.
+2. Open **Actions** in this repository and select **Odds API Production Smoke**.
+3. Tap **Run workflow**, paste the event ID, and choose
+   **SPEND_ONE_CREDIT**.
+4. Open the completed job and verify the sanitized JSON reports `"ok": true`,
+   the expected event ID, at least one bookmaker, and `"requests_last"` no
+   greater than `1`.
+5. Stop after that run. Do not repeat it for additional bookmakers or markets.
+6. Only after a successful smoke, change `ENABLE_ODDS_API` to `true` in
+   `fly.toml` and deploy that reviewed change.
+
+The workflow has no automatic trigger. Its script validates the key and
+canonical provider registration before contacting the provider, fixes the
+request to NFL / US / head-to-head, makes exactly one request with redirects
+and retries disabled, checks the provider's usage headers, and never prints
+the API key or request URL.
+
+The scheduled commercial odds importer remains separately fail-closed. It
+requires `ENABLE_ODDS_API=true`, `ENABLE_COMMERCIAL_SYNC=true`, and
+`ENABLE_COMMERCIAL_ODDS_SYNC=true`; leave the commercial gates off until its
+cadence is intentionally approved.
+
 ## 6. Deploy manually once
 
 ```bash

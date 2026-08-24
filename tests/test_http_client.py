@@ -30,6 +30,8 @@ def test_odds_api_uses_shared_http_client(monkeypatch):
         return Response()
 
     monkeypatch.setenv("ODDS_API_KEY", "test-key")
+    monkeypatch.setenv("ENABLED_PROVIDERS", "nflverse,nws,the-odds-api")
+    monkeypatch.setenv("ENABLE_ODDS_API", "true")
     monkeypatch.setattr(http_client, "get", fake_get)
 
     result = odds_api._get("/test", regions="us")
