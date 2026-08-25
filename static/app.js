@@ -196,14 +196,14 @@
       ['live','Live Center','/live'],['analytics','Analytics','/analytics'],['scouting','Scouting','/scouting'],['models','Model Ops','/model-operations'],['enterprise','Enterprise Ops','/enterprise-operations'],['rankings','Rankings','/rankings'],
       ['props','Props','/props'],['tracker','Tracker','/tracker'],['settings','Settings','/settings'],['admin','Data Ops','/admin/data']
     ];
-    const sidebar=document.createElement('aside'); sidebar.className='ai-sidebar';
+    const sidebar=document.createElement('aside'); sidebar.className='ai-sidebar'; sidebar.id='app-menu'; sidebar.setAttribute('aria-label','Application menu');
     sidebar.innerHTML=`<a class="ai-brand" href="/"><span class="ai-mark">N</span><span>NFL ANALYTICS<small>AI Intelligence Hub</small></span></a>
       <nav class="ai-nav">${nav.map(([k,l,h])=>`<a href="${h}" class="${k===active?'on':''}">${ICONS[k]}${l}</a>`).join('')}</nav>
       <div class="ai-engine"><strong><span class="pulse"></span>AI ENGINE ONLINE</strong><span id="engine-version">Intelligence v2.0</span></div>`;
     document.body.prepend(sidebar);
     const top=document.createElement('header'); top.className='ai-topbar';
     top.innerHTML=`<input class="ai-search" id="global-search" placeholder="Ask anything: player, team, or stat question…" aria-label="Global search">
-      <div class="ai-top-actions"><span class="weekchip" id="weekchip"></span><button class="ai-iconbtn" id="open-slip" title="Bet slip">⌁<span class="n slip-count">0</span></button><button class="ai-iconbtn">♢</button><div class="ai-profile"><span class="ai-avatar" id="profile-avatar">JS</span><span><b id="profile-name">Account</b><button class="logout-btn" id="logout-btn">Sign out</button></span></div></div>`;
+      <div class="ai-top-actions"><span class="weekchip" id="weekchip"></span><button class="ai-iconbtn" id="open-slip" title="Bet slip" aria-label="Open bet slip">⌁<span class="n slip-count">0</span></button><button class="ai-iconbtn ai-utility-btn" title="Status" aria-label="Application status">♢</button><div class="ai-profile"><span class="ai-avatar" id="profile-avatar">JS</span><span><b id="profile-name">Account</b><button class="logout-btn" id="logout-btn">Sign out</button></span></div></div>`;
     document.body.prepend(top);
     const drawer=document.createElement('div'); drawer.innerHTML=`<div class="slip-backdrop" id="slip-backdrop"></div><aside class="slip" id="slip" aria-label="Bet slip"><div class="head"><h3>Bet Slip</h3><button class="x" aria-label="close">×</button></div><div class="body" id="slip-body"></div><div class="foot"><div style="display:flex;justify-content:space-between" class="muted">Total stake <b id="slip-total" style="color:var(--t)">$0</b></div><button class="btn primary" id="slip-confirm">Confirm picks</button></div></aside>`;
     document.body.appendChild(drawer);
@@ -212,19 +212,22 @@
        core destinations + a Menu tab that opens the sidebar as a drawer. */
     const navBackdrop=document.createElement('div'); navBackdrop.className='nav-backdrop'; navBackdrop.id='nav-backdrop';
     document.body.appendChild(navBackdrop);
-    const bnav=document.createElement('nav'); bnav.className='bnav';
+    const bnav=document.createElement('nav'); bnav.className='bnav'; bnav.setAttribute('aria-label','Mobile navigation');
     bnav.innerHTML=[
       `<a href="/" class="${active==='dashboard'?'on':''}">${ICONS.dashboard}Home</a>`,
       `<a href="/props" class="${active==='props'?'on':''}">${ICONS.props}Props</a>`,
       `<a href="#" id="bnav-slip">${ICONS.slip}Slip<span class="n slip-count">0</span></a>`,
       `<a href="/tracker" class="${active==='tracker'?'on':''}">${ICONS.tracker}Tracker</a>`,
-      `<a href="#" id="bnav-menu">${ICONS.menu}Menu</a>`,
+      `<a href="#" id="bnav-menu" role="button" aria-controls="app-menu" aria-expanded="false">${ICONS.menu}Menu</a>`,
     ].join('');
     document.body.appendChild(bnav);
-    const closeMenu=()=>{sidebar.classList.remove('open');navBackdrop.classList.remove('open')};
-    $('#bnav-menu').onclick=e=>{e.preventDefault();sidebar.classList.toggle('open');navBackdrop.classList.toggle('open')};
+    const menuButton=$('#bnav-menu');
+    const closeMenu=()=>{sidebar.classList.remove('open');navBackdrop.classList.remove('open');menuButton.setAttribute('aria-expanded','false')};
+    menuButton.onclick=e=>{e.preventDefault();const opening=!sidebar.classList.contains('open');sidebar.classList.toggle('open',opening);navBackdrop.classList.toggle('open',opening);menuButton.setAttribute('aria-expanded',String(opening))};
     $('#bnav-slip').onclick=e=>{e.preventDefault();closeMenu();openSlip();};
     navBackdrop.onclick=closeMenu;
+    sidebar.querySelectorAll('a').forEach(link=>link.addEventListener('click',closeMenu));
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMenu();closeSlip()}});
 
     $('#open-slip').onclick=openSlip; $('#slip .x').onclick=closeSlip; $('#slip-backdrop').onclick=closeSlip; $('#slip-confirm').onclick=confirmSlip;
     renderBadges(); renderWeekChip(getWeek());
