@@ -123,7 +123,29 @@ def _record(key: str, status: str, error: str | None = None) -> None:
     row.last_status = status
     row.last_error = error
     row.last_finished_at = datetime.now(timezone.utc)
+    job = _scheduler.get_job(key) if _scheduler else None
+    row.next_run_at = job.next_run_time if job else None
     db.session.commit()
+
+
+def _register_jobs(app) -> None:
+    """Persist scheduler registration so the web process can assess freshness."""
+    with app.app_context():
+        for key, cfg in JOBS.items():
+            row = db.session.scalar(db.select(ScheduledJob).where(ScheduledJob.key == key))
+            enabled = _job_enabled(key)
+            minutes = _job_minutes(key) if enabled else int(cfg["minutes"])
+            if not row:
+                row = ScheduledJob(key=key, name=cfg["name"], cron=f"every {minutes} minutes")
+                db.session.add(row)
+            row.name = cfg["name"]
+            row.cron = f"every {minutes} minutes"
+            row.enabled = enabled
+            job = _scheduler.get_job(key) if _scheduler else None
+            row.next_run_at = job.next_run_time if job else None
+            if row.enabled and not row.last_status:
+                row.last_status = "scheduled"
+        db.session.commit()
 
 
 def _target_season() -> int:
@@ -223,4 +245,5 @@ def start_scheduler(app):
             misfire_grace_time=max(60, min(minutes * 60, 3600)),
         )
     _scheduler.start()
+    _register_jobs(app)
     return _scheduler
