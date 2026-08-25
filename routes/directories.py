@@ -97,7 +97,8 @@ def api_teams_directory():
             "next_game_id": nxt.get("game_id") if nxt else None,
             "next_game_date": nxt.get("date") if nxt else None,
         })
-    rows.sort(key=lambda r: r["power_score"], reverse=True)
+    rows.sort(key=lambda row: (row["power_score"] is None,
+                               -(row["power_score"] or 0)))
     for i, row in enumerate(rows, 1):
         row["rank"] = i
     return jsonify({"season": season, "stats_season": ss, "teams": rows, "total": len(rows)})
