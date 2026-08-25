@@ -12,6 +12,7 @@ from db_models import (
     DataQualityIssue,
     Game,
     Player,
+    PlayerExternalIdentity,
     PlayerGameStat,
     PlayerTeamSeason,
     Team,
@@ -105,6 +106,23 @@ def run_quality_checks(*, clear_open: bool = True) -> dict:
         issues.append(_issue("missing_player_membership", "warning", "player", str(player_id),
                              "Player game fact has no matching player-team-season membership.",
                              {"team_id": team_id, "season": season}))
+
+    # Every player needs at least one source-scoped identity. Without it, a
+    # future provider row can recreate the athlete under a second namespace.
+    players_without_identity = db.session.scalars(
+        select(Player)
+        .outerjoin(PlayerExternalIdentity, PlayerExternalIdentity.player_id == Player.id)
+        .where(PlayerExternalIdentity.id.is_(None))
+    ).all()
+    for player in players_without_identity:
+        issues.append(_issue(
+            "player_without_identity",
+            "warning",
+            "player",
+            str(player.id),
+            "Player has no source-scoped external identity.",
+            {"external_id": player.external_id},
+        ))
 
     # Coaches need assignments to be useful.
     unassigned_coaches = db.session.scalars(

@@ -9,11 +9,19 @@ from pathlib import Path
 from sqlalchemy import select
 
 from database import db
+from db_models import (
+    Coach,
+    CoachingAssignment,
+    DataSyncRun,
+    Game,
+    PlayerGameStat,
+    PlayerTeamSeason,
+    Season,
+    Team,
+)
+from player_identity import resolve_player
 from source_registry import capture_raw, register_source
 from team_identity import normalize_team
-from db_models import (
-    Coach, CoachingAssignment, DataSyncRun, Game, Player, PlayerGameStat, PlayerTeamSeason, Season, Team,
-)
 
 STAT_FIELDS = [
     "completions", "attempts", "passing_yards", "passing_tds", "interceptions",
@@ -114,29 +122,26 @@ def import_player_week(path: str | Path, source=None) -> dict:
             if not game or not team or not opponent or not row.get("player_id"):
                 skipped += 1
                 continue
-            # The cache names athletes by ESPN id; the nflverse feeds name them
-            # by gsis id. Resolve onto the existing player when the roster feed
-            # has already mapped the two, so one person keeps one row.
-            espn_id = str(row["player_id"])
-            player = db.session.scalar(select(Player).where(Player.espn_id == espn_id))
-            if not player:
-                player = db.session.scalar(select(Player).where(Player.external_id == espn_id))
-            if not player:
-                name = row.get("player_name") or str(row["player_id"])
-                parts = name.split(" ", 1)
-                player = Player(external_id=str(row["player_id"]), full_name=name,
-                                first_name=parts[0], last_name=parts[1] if len(parts) > 1 else None,
-                                position=row.get("position"))
-                db.session.add(player)
-                db.session.flush()
-            else:
-                player.full_name = row.get("player_name") or player.full_name
-                player.position = row.get("position") or player.position
-
             season_year = int(row["season"])
             if not db.session.get(Season, season_year):
                 db.session.add(Season(year=season_year))
                 db.session.flush()
+
+            # ESPN ids live in their own namespace. The source-scoped resolver
+            # can attach this id to a roster player by a trusted id bridge or a
+            # unique same-team name match without confusing another provider's
+            # numeric id for ESPN's.
+            espn_id = str(row["player_id"])
+            player = resolve_player(
+                {"espn": espn_id},
+                full_name=row.get("player_name") or espn_id,
+                position=row.get("position"),
+                team_id=team.id,
+                season=season_year,
+            )
+            if not player:
+                skipped += 1
+                continue
             membership = db.session.scalar(select(PlayerTeamSeason).where(
                 PlayerTeamSeason.player_id == player.id,
                 PlayerTeamSeason.team_id == team.id,

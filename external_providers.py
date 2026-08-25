@@ -17,8 +17,19 @@ from typing import Iterable
 import requests
 
 from database import db
-from db_models import (DataSource, DataSyncRun, DepthChartEntry, Game, InjuryReport,
-                       Player, PlayerTeamSeason, Season, SnapCount, Team)
+from db_models import (
+    DataSource,
+    DataSyncRun,
+    DepthChartEntry,
+    Game,
+    InjuryReport,
+    Player,
+    PlayerTeamSeason,
+    Season,
+    SnapCount,
+    Team,
+)
+from player_identity import nflverse_identities, normalize_external_id, resolve_player
 from source_registry import capture_raw, clear_raw_cache, prime_raw_cache, register_source
 from team_identity import normalize_team
 
@@ -289,29 +300,40 @@ def clear_player_index() -> None:
 
 
 def _ensure_player(row) -> Player | None:
-    ext = str(row.get("gsis_id") or row.get("player_id") or row.get("nflverse_id") or "").strip()
+    identities = nflverse_identities(row)
+    ext = normalize_external_id(identities.get("nflverse"))
     name = str(
         row.get("full_name") or row.get("player_display_name")
         or row.get("player_name") or row.get("name") or ""
     ).strip()
-    if not ext or not name:
+    if not any(normalize_external_id(value) for value in identities.values()) or not name:
         return None
-    if _players_by_ext is not None:
+    if ext and _players_by_ext is not None:
         player = _players_by_ext.get(ext)
-    else:
+    elif ext:
         player = db.session.scalar(db.select(Player).where(Player.external_id == ext))
-    if not player:
-        player = Player(external_id=ext, full_name=name)
-        db.session.add(player); db.session.flush()
-        if _players_by_ext is not None:
+    else:
+        player = None
+
+    pfr = normalize_external_id(identities.get("pfr"))
+    espn = normalize_external_id(identities.get("espn"))
+    needs_resolution = (
+        player is None
+        or (pfr is not None and player.pfr_id != pfr)
+        or (espn is not None and player.espn_id != espn)
+    )
+    if needs_resolution:
+        player = resolve_player(
+            identities,
+            full_name=name,
+            position=row.get("position"),
+        )
+        if player and ext and _players_by_ext is not None:
             _players_by_ext[ext] = player
-    player.full_name = name; player.position = row.get("position") or player.position
-    pfr = str(row.get("pfr_id") or "").strip()
-    if pfr and not player.pfr_id:
-        player.pfr_id = pfr
-    espn = str(row.get("espn_id") or "").strip()
-    if espn and not player.espn_id:
-        player.espn_id = espn
+    if not player:
+        return None
+    player.full_name = name
+    player.position = row.get("position") or player.position
     return player
 
 

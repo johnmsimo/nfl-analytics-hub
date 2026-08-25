@@ -1,11 +1,33 @@
 """Operational admin APIs for warehouse, jobs, models, and freshness."""
 from __future__ import annotations
+
 from datetime import datetime, timezone
+
 from flask import Blueprint, current_app, jsonify, request, session
 from sqlalchemy import func
+
 from database import db
-from db_models import (AuditLog, DataQualityIssue, DataSource, DataSyncRun, Game,
-    ModelVersion, Play, Prediction, ScheduledJob, TeamAdvancedSeasonStat, InjuryReport, DepthChartEntry, SnapCount, WeatherObservation, OddsSnapshot, LeagueTransaction, Coach)
+from db_models import (
+    AuditLog,
+    Coach,
+    DataQualityIssue,
+    DataSource,
+    DataSyncRun,
+    DepthChartEntry,
+    Game,
+    InjuryReport,
+    LeagueTransaction,
+    ModelVersion,
+    OddsSnapshot,
+    Play,
+    Player,
+    PlayerExternalIdentity,
+    Prediction,
+    ScheduledJob,
+    SnapCount,
+    TeamAdvancedSeasonStat,
+    WeatherObservation,
+)
 from model_registry import evaluate_predictions
 from play_by_play import rebuild_advanced_team_stats
 from scheduled_jobs import JOBS, run_job
@@ -56,6 +78,73 @@ def overview():
             "last_status": x.last_status, "last_finished_at": x.last_finished_at.isoformat() if x.last_finished_at else None,
             "last_error": x.last_error} for x in db.session.scalars(db.select(ScheduledJob).order_by(ScheduledJob.key)).all()],
     })
+
+
+@admin_bp.get("/player-identities")
+def player_identities():
+    by_source = db.session.execute(
+        db.select(PlayerExternalIdentity.source_key, func.count())
+        .group_by(PlayerExternalIdentity.source_key)
+        .order_by(PlayerExternalIdentity.source_key)
+    ).all()
+    unlinked = db.session.scalar(
+        db.select(func.count())
+        .select_from(Player)
+        .outerjoin(PlayerExternalIdentity, PlayerExternalIdentity.player_id == Player.id)
+        .where(PlayerExternalIdentity.id.is_(None))
+    )
+    return jsonify({
+        "players": db.session.scalar(db.select(func.count()).select_from(Player)),
+        "identities": db.session.scalar(
+            db.select(func.count()).select_from(PlayerExternalIdentity)
+        ),
+        "players_without_identity": unlinked,
+        "by_source": {source: count for source, count in by_source},
+    })
+
+
+@admin_bp.get("/player-identities/reconcile")
+def player_identity_reconciliation_preview():
+    from player_identity import reconcile_raw_player_identities
+
+    return jsonify(reconcile_raw_player_identities(dry_run=True))
+
+
+@admin_bp.post("/player-identities/reconcile")
+def player_identity_reconciliation_apply():
+    from player_identity import reconcile_raw_player_identities
+
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirm") != "merge-cross-provider-player-identities":
+        return jsonify({
+            "error": "confirmation_required",
+            "confirm": "merge-cross-provider-player-identities",
+        }), 400
+    result = reconcile_raw_player_identities(dry_run=False)
+    _audit("player.identity.reconciled", "warehouse", "players", result)
+    return jsonify(result)
+
+
+@admin_bp.get("/warehouse-retention")
+def warehouse_retention_preview():
+    from warehouse_retention import apply_warehouse_retention
+
+    return jsonify(apply_warehouse_retention(dry_run=True))
+
+
+@admin_bp.post("/warehouse-retention/apply")
+def warehouse_retention_apply():
+    from warehouse_retention import apply_warehouse_retention
+
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirm") != "prune-old-warehouse-records":
+        return jsonify({
+            "error": "confirmation_required",
+            "confirm": "prune-old-warehouse-records",
+        }), 400
+    result = apply_warehouse_retention(dry_run=False)
+    _audit("warehouse.retention.applied", "warehouse", "operational-data", result)
+    return jsonify(result)
 
 
 @admin_bp.get("/jobs")

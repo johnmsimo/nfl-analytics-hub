@@ -103,6 +103,26 @@ class Player(TimestampMixin, db.Model):
     active = db.Column(db.Boolean, nullable=False, default=True, index=True)
 
 
+class PlayerExternalIdentity(TimestampMixin, db.Model):
+    """Source-scoped player identifiers joined to one canonical player row."""
+
+    __tablename__ = "player_external_identities"
+    id = db.Column(db.Integer, primary_key=True)
+    player_id = db.Column(
+        db.Integer,
+        db.ForeignKey("players.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_key = db.Column(db.String(40), nullable=False)
+    external_id = db.Column(db.String(80), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("source_key", "external_id", name="uq_player_external_identity"),
+        db.Index("ix_player_identity_player_source", "player_id", "source_key"),
+    )
+
+
 class PlayerTeamSeason(TimestampMixin, db.Model):
     __tablename__ = "player_team_seasons"
     id = db.Column(db.Integer, primary_key=True)
@@ -326,6 +346,13 @@ class RawIngestRecord(db.Model):
             "source_id", "entity_type", "external_id", "payload_hash", name="uq_raw_ingest_version"
         ),
         db.Index("ix_raw_ingest_lookup", "source_id", "entity_type", "external_id"),
+        db.Index(
+            "ix_raw_ingest_retention",
+            "source_id",
+            "entity_type",
+            "external_id",
+            "ingested_at",
+        ),
     )
 
 

@@ -14,6 +14,7 @@
 - `games`: schedule, status, venue, participants, score
 - `team_game_stats`: team-level game facts and advanced-stat fields
 - `players`: canonical player identity and bio fields
+- `player_external_identities`: source-scoped nflverse, ESPN, PFR, SportsDataIO, and legacy ids
 - `player_team_seasons`: roster history by team and season
 - `player_game_stats`: per-player, per-game box-score facts
 - `coaches`: canonical coach identity
@@ -98,6 +99,28 @@ GET  /api/data/coaches/{id}/profile
 ```
 
 All write endpoints remain protected by authentication and CSRF controls.
+
+### P2.1 identity and retention hardening
+
+Player ids are resolved inside their provider namespace. A trusted nflverse row
+that carries GSIS plus ESPN or PFR ids can consolidate an older duplicate and
+move its memberships, game facts, season aggregates, injury reports, depth
+charts, snap counts, and transactions onto one canonical player.
+
+Warehouse retention preserves the newest configured versions even when they
+are old, prunes only superseded raw payloads and surplus completed sync runs,
+and never removes unresolved quality issues. Review the dry-run response before
+activation:
+
+```text
+GET  /api/admin/player-identities
+GET  /api/admin/player-identities/reconcile
+POST /api/admin/player-identities/reconcile
+     {"confirm":"merge-cross-provider-player-identities"}
+GET  /api/admin/warehouse-retention
+POST /api/admin/warehouse-retention/apply
+     {"confirm":"prune-old-warehouse-records"}
+```
 
 ### Quality checks
 

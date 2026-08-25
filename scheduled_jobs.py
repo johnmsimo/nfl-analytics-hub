@@ -17,7 +17,6 @@ from db_models import ScheduledJob
 from external_providers import sync_external
 from play_by_play import rebuild_advanced_team_stats
 
-
 _scheduler = None
 _PROVIDER_SYNC_LOCK = threading.Lock()
 _TRUE_VALUES = {"1", "true", "yes"}
@@ -47,6 +46,12 @@ JOBS = {
     "cached-data-sync": {"name": "Cached data sync", "minutes": 60},
     "analytics-rebuild": {"name": "Warehouse aggregate rebuild", "minutes": 60},
     "quality-checks": {"name": "Data quality checks", "minutes": 60},
+    "warehouse-retention": {
+        "name": "Warehouse retention",
+        "minutes": 1440,
+        "minutes_env": "WAREHOUSE_RETENTION_INTERVAL_MINUTES",
+        "enabled_envs": ("ENABLE_WAREHOUSE_RETENTION",),
+    },
     "external-rosters-sync": _provider_job(
         "external", "rosters", "nflverse roster sync", 360
     ),
@@ -189,8 +194,13 @@ def run_job(app, key):
             db.session.commit()
 
         is_provider = "provider_family" in JOBS[key]
-        if is_provider and not _PROVIDER_SYNC_LOCK.acquire(blocking=False):
-            reason = "another provider sync is already running"
+        uses_warehouse_lock = is_provider or key == "warehouse-retention"
+        if uses_warehouse_lock and not _PROVIDER_SYNC_LOCK.acquire(blocking=False):
+            reason = (
+                "another provider sync is already running"
+                if is_provider
+                else "another provider sync or retention run is already running"
+            )
             _record(key, "skipped", reason)
             app.logger.warning("scheduled job %s skipped: %s", key, reason)
             return
@@ -207,6 +217,10 @@ def run_job(app, key):
                 rebuild_advanced_team_stats(None)
             elif key == "quality-checks":
                 run_quality_checks()
+            elif key == "warehouse-retention":
+                from warehouse_retention import apply_warehouse_retention
+
+                apply_warehouse_retention(dry_run=False)
             else:
                 _run_provider_job(key)
             _record(key, "success")
@@ -214,7 +228,7 @@ def run_job(app, key):
             _record(key, "failed", str(exc))
             app.logger.exception("scheduled job %s failed", key)
         finally:
-            if is_provider:
+            if uses_warehouse_lock:
                 _PROVIDER_SYNC_LOCK.release()
 
 
