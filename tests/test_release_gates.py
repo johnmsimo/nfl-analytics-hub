@@ -30,7 +30,17 @@ def test_production_deploy_requires_successful_tested_main_push():
     assert "github.event.workflow_run.event == 'push'" in deploy
     assert "github.event.workflow_run.head_branch == 'main'" in deploy
     assert "ref: ${{ github.event.workflow_run.head_sha }}" in deploy
-    assert 'test "$(git rev-parse origin/main)" = "$DEPLOY_SHA"' in deploy
+    assert "cancel-in-progress: true" in deploy
+    assert 'CURRENT_MAIN_SHA="$(git ls-remote origin refs/heads/main' in deploy
+    assert 'test "$CURRENT_MAIN_SHA" = "$DEPLOY_SHA"' in deploy
+    assert "flyctl deploy --remote-only" in deploy
+
+
+def test_deployment_guide_has_no_obsolete_dispatch_bypass():
+    guide = (ROOT / "DEPLOY_FLY.md").read_text(encoding="utf-8")
+
+    assert "Manual deployment remains available through the workflow dispatch" not in guide
+    assert "There is no workflow-dispatch bypass" in guide
 
 
 def test_main_protection_contract_requires_all_release_checks():

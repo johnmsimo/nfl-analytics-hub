@@ -286,8 +286,8 @@ This repository is ready for a private GitHub repository and Fly.io deployment.
 - Main branch protection contract: `.github/MAIN_PROTECTION.md`
 - Deployment guide: `DEPLOY_FLY.md`
 
-Production deploys are accepted only for the exact current `main` commit after
-its push-triggered `CI / test` job succeeds. Pull requests into `main` must also
+Production deploys are accepted only for the latest CI-tested `main` commit
+after its push-triggered `CI / test` job succeeds. Pull requests into `main` must also
 pass the required `Quality and Security / quality` and
 `Quality and Security / analytics-tests` checks documented in the branch
 protection contract.

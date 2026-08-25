@@ -161,7 +161,7 @@ Create an app-scoped deploy token:
 fly tokens create deploy -x 720h
 ```
 
-In the GitHub repository, create an Actions secret named `FLY_API_TOKEN` containing the complete token. Automatic deployment runs only after the `CI` workflow succeeds for a push to `main`. Manual deployment remains available through the workflow dispatch control.
+In the GitHub repository, create an Actions secret named `FLY_API_TOKEN` containing the complete token. Automatic deployment runs only after the `CI` workflow succeeds for a push to `main`. There is no workflow-dispatch bypass; an emergency operator deployment must use the audited `fly deploy` recovery procedure from an explicitly verified commit.
 
 ## 8. Verify production
 

@@ -20,8 +20,10 @@ request.
 
 The Fly deployment workflow is a second independent gate. It has no manual
 deployment bypass, accepts only a successful push-triggered `CI` run on
-`main`, checks out that run's exact commit, and refuses to deploy if a newer
-commit has replaced it on `main`.
+`main`, and checks out that run's exact commit. Immediately before invoking
+Fly it confirms that the commit is still the head of `main`. A newer successful
+CI run cancels any older in-progress production workflow, so production moves
+forward through tested commits rather than waiting behind a superseded deploy.
 
 An administrator can apply the checked-in contract with GitHub's branch
 protection API:
