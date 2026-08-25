@@ -62,7 +62,8 @@ def api_analytics():
             "power_score": _team_power(row),
             "next_opponent": _next_opponent(code, season),
         })
-    teams.sort(key=lambda x: x["power_score"], reverse=True)
+    teams.sort(key=lambda row: (row["power_score"] is None,
+                                -(row["power_score"] or 0)))
 
     market_rows = []
     position_counts = defaultdict(int)
@@ -112,11 +113,13 @@ def api_rankings():
     logs = nfl_data.player_game_logs(ss)
     idx = nfl_data.player_index(ss)
 
-    team_rows = sorted(({
+    team_rows = [{
         **row,
         "power_score": _team_power(row),
         "point_diff": round(row.get("ppg", 0) - row.get("papg", 0), 1),
-    } for row in summaries.values()), key=lambda x: x["power_score"], reverse=True)
+    } for row in summaries.values()]
+    team_rows.sort(key=lambda row: (row["power_score"] is None,
+                                    -(row["power_score"] or 0)))
     for i, row in enumerate(team_rows, 1):
         row["rank"] = i
 
