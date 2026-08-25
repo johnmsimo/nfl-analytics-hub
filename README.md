@@ -46,6 +46,12 @@ staking, and closing-line capture.
 | `V45_DELIVERY_BACKOFF_SECONDS` | `5` | Initial retry backoff; exponential and bounded |
 | `V45_DELIVERY_TIMEOUT_SECONDS` | `10` | Per-destination HTTPS timeout |
 | `V45_DELIVERY_HEARTBEAT_TTL_SECONDS` | `90` | Delivery worker heartbeat freshness window |
+| `ENABLE_WAREHOUSE_RETENTION` | `false` | Enables the P2.1 daily warehouse-pruning job after preview approval |
+| `WAREHOUSE_RAW_RETENTION_DAYS` | `180` | Minimum age before superseded raw versions become eligible |
+| `WAREHOUSE_RAW_VERSIONS_PER_ENTITY` | `5` | Raw versions always preserved per source/entity key |
+| `WAREHOUSE_SYNC_RUN_RETENTION_DAYS` | `180` | Minimum age for surplus completed sync runs |
+| `WAREHOUSE_SYNC_RUNS_PER_SOURCE` | `25` | Sync runs always preserved per source |
+| `WAREHOUSE_RESOLVED_QUALITY_RETENTION_DAYS` | `90` | Retention for resolved issues; unresolved issues are never pruned |
 | `PORT` | `10000` dev / `8080` Fly | Bind port |
 
 A `.env` in the repo root is auto-loaded at boot.
@@ -142,6 +148,15 @@ POST /api/data/sync
 ```
 
 Core tables cover teams, seasons, games, team-game stats, players, player-team seasons, player-game stats, coaches, coaching assignments, versioned analytics snapshots, and data-sync audit runs. The coach schema is ready; a licensed/reliable coaching source still needs to be selected before automated coach ingestion is enabled.
+
+P2.1 adds `player_external_identities`, which keeps nflverse/GSIS, ESPN, PFR,
+SportsDataIO, and legacy identifiers in separate namespaces. Trusted bridge rows
+consolidate legacy duplicates and reparent their warehouse facts. Retention is
+preview-first and disabled by default. Identity reconciliation also exposes a
+read-only preview before requiring the literal confirmation
+`merge-cross-provider-player-identities`. `GET /api/admin/warehouse-retention`
+reports candidates, while the protected apply endpoint requires the literal
+confirmation `prune-old-warehouse-records`.
 
 ### Warehouse aggregation
 

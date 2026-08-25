@@ -252,7 +252,7 @@ def test_ensure_player_reads_the_display_name_and_espn_id(app_fixture):
 
 def test_boxscore_cache_resolves_onto_the_nflverse_player(app_fixture):
     """One athlete must not own both an ESPN-id row and a gsis-id row."""
-    from data_ingestion import Player as _P  # same model, imported where used
+    from db_models import Player as _P
 
     with app_fixture.app_context():
         nflverse = ep._ensure_player(

@@ -4,15 +4,27 @@ All connectors are opt-in and fail closed when credentials are absent. Provider
 responses are normalized into warehouse models while retaining raw payloads.
 """
 from __future__ import annotations
+
 import os
-from datetime import datetime, timezone, date
-from urllib.parse import quote
+from datetime import datetime, timezone
+
 import requests
+
 from database import db
-from db_models import (Coach, CoachingAssignment, DataSyncRun, Game, LeagueTransaction,
-                       OddsSnapshot, Player, Season, Team, WeatherObservation)
+from db_models import (
+    Coach,
+    CoachingAssignment,
+    DataSyncRun,
+    Game,
+    LeagueTransaction,
+    OddsSnapshot,
+    Season,
+    Team,
+    WeatherObservation,
+)
+from external_providers import _date, _float, _int, _team
+from player_identity import resolve_player
 from source_registry import capture_raw, register_source
-from external_providers import _date, _float, _int, _team, _ensure_player
 
 STADIUM_COORDS = {
  "State Farm Stadium": (33.5276,-112.2626), "Mercedes-Benz Stadium": (33.7554,-84.4008),
@@ -142,8 +154,14 @@ def sync_transactions(season:int):
             if not ext or not d: continue
             item=db.session.scalar(db.select(LeagueTransaction).where(LeagueTransaction.external_id==f"sportsdataio:{ext}"))
             if not item: item=LeagueTransaction(external_id=f"sportsdataio:{ext}",transaction_date=d); db.session.add(item); written+=1
-            player=_ensure_player({"player_id":row.get("PlayerID") or row.get("PlayerId"),"player_name":row.get("Name") or row.get("PlayerName")})
-            team=teams.get(_team(row.get("Team") or row.get("TeamKey"))); item.player_id=player.id if player else None; item.team_id=team.id if team else None; item.transaction_type=row.get("Type") or row.get("TransactionType"); item.description=row.get("Description"); item.source_key=source.key; item.raw_payload=row
+            team=teams.get(_team(row.get("Team") or row.get("TeamKey")))
+            player=resolve_player(
+                {"sportsdataio":row.get("PlayerID") or row.get("PlayerId")},
+                full_name=row.get("Name") or row.get("PlayerName"),
+                team_id=team.id if team else None,
+                season=season,
+            )
+            item.player_id=player.id if player else None; item.team_id=team.id if team else None; item.transaction_type=row.get("Type") or row.get("TransactionType"); item.description=row.get("Description"); item.source_key=source.key; item.raw_payload=row
             capture_raw(source,"transaction",ext,row,season=season)
         db.session.commit(); _finish(run,source,read,written); return {"dataset":"transactions","read":read,"written":written}
     except Exception as exc: db.session.rollback(); _finish(run,source,read,written,exc); raise

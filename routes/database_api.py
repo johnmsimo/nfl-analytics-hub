@@ -6,14 +6,27 @@ import os
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import func, select
 
-from database import db
-from data_ingestion import sync_cached_data
 from analytics_warehouse import rebuild_analytics
-from db_models import (Coach, CoachingAssignment, CoachSeasonStat, DataSyncRun, Game,
-    Player, PlayerGameStat, PlayerSeasonStat, Team, TeamGameStat, TeamSeasonStat,
-    DataSource, RawIngestRecord, DataQualityIssue)
+from data_ingestion import sync_cached_data
+from database import db
+from db_models import (
+    Coach,
+    CoachingAssignment,
+    CoachSeasonStat,
+    DataQualityIssue,
+    DataSource,
+    DataSyncRun,
+    Game,
+    Player,
+    PlayerExternalIdentity,
+    PlayerGameStat,
+    PlayerSeasonStat,
+    RawIngestRecord,
+    Team,
+    TeamGameStat,
+    TeamSeasonStat,
+)
 from team_identity import normalize_team
-
 
 database_bp = Blueprint("database", __name__, url_prefix="/api/data")
 
@@ -23,6 +36,7 @@ def status():
     counts = {}
     for name, model in {
         "teams": Team, "games": Game, "players": Player,
+        "player_external_identities": PlayerExternalIdentity,
         "player_game_stats": PlayerGameStat, "team_game_stats": TeamGameStat,
         "team_season_stats": TeamSeasonStat, "player_season_stats": PlayerSeasonStat,
         "coaches": Coach, "coaching_assignments": CoachingAssignment,
@@ -106,8 +120,8 @@ def sources():
 
 @database_bp.get("/coverage")
 def coverage():
-    from coverage_service import coverage_report
     import nfl_data
+    from coverage_service import coverage_report
 
     season = request.args.get("season", type=int) or nfl_data.default_season()
     return jsonify(coverage_report(season))

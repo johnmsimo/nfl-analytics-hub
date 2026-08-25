@@ -332,15 +332,46 @@ def schedule_status(season: int | None = None, now: datetime | None = None) -> d
         if counts[season_type] < minimum
     ]
 
-    current = None
+    # Readiness may be evaluated for a historical instant during deployment
+    # verification. Runtime score refreshes can mark that week's games final,
+    # so completed flags alone would incorrectly advance a historical check to
+    # the next week. Resolve the latest schedule period that had started at the
+    # requested instant; fall back to completion state only when dates are
+    # absent or the season has not started.
+    period_starts: dict[tuple[str, int], datetime] = {}
     for game in games:
-        if not game.get("completed"):
-            current = {
-                "season": season,
-                "week": game.get("week"),
-                "season_type": game.get("season_type"),
-            }
-            break
+        season_type = game.get("season_type")
+        week = game.get("week")
+        if season_type not in counts or not isinstance(week, int):
+            continue
+        try:
+            kickoff = datetime.fromisoformat(str(game.get("date") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if kickoff.tzinfo is None:
+            kickoff = kickoff.replace(tzinfo=timezone.utc)
+        key = (season_type, week)
+        if key not in period_starts or kickoff < period_starts[key]:
+            period_starts[key] = kickoff
+
+    started = [
+        (start, season_type, week)
+        for (season_type, week), start in period_starts.items()
+        if start <= checked_at
+    ]
+    current = None
+    if started:
+        _start, season_type, week = max(started)
+        current = {"season": season, "week": week, "season_type": season_type}
+    else:
+        for game in games:
+            if not game.get("completed"):
+                current = {
+                    "season": season,
+                    "week": game.get("week"),
+                    "season_type": game.get("season_type"),
+                }
+                break
     if current is None and games:
         last = games[-1]
         current = {
