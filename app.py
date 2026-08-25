@@ -182,8 +182,19 @@ def page_player(pid):
 
 @app.route("/health")
 def health():
-    """Liveness probe: process is running."""
-    return jsonify({"ok": True, "uptime_sec": round(time.time() - _BOOT_TS, 1)})
+    """Liveness plus sanitized production freshness reporting."""
+    from production_freshness import production_freshness
+
+    schedule = nfl_data.schedule_status()
+    freshness = production_freshness(schedule)
+    return jsonify(
+        {
+            "ok": True,
+            "status": freshness["status"],
+            "uptime_sec": round(time.time() - _BOOT_TS, 1),
+            "freshness": freshness,
+        }
+    )
 
 
 @app.route("/ready")
@@ -199,11 +210,30 @@ def ready():
         app.logger.exception("Readiness database check failed")
         return jsonify({"ok": False, "database": "unavailable"}), 503
 
+    from production_freshness import production_freshness
+
     schedule = nfl_data.schedule_status()
+    freshness = production_freshness(schedule)
     if not schedule["ready"]:
         app.logger.error("Readiness schedule check failed: %s", schedule["issues"])
-        return jsonify({"ok": False, "database": "ready", "schedule": schedule}), 503
-    return jsonify({"ok": True, "database": "ready", "schedule": schedule})
+        return jsonify(
+            {
+                "ok": False,
+                "status": "unavailable",
+                "database": "ready",
+                "schedule": schedule,
+                "freshness": freshness,
+            }
+        ), 503
+    return jsonify(
+        {
+            "ok": True,
+            "status": freshness["status"],
+            "database": "ready",
+            "schedule": schedule,
+            "freshness": freshness,
+        }
+    )
 
 
 @app.route("/metrics")
