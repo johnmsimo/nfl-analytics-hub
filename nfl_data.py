@@ -302,6 +302,20 @@ def schedule_status(season: int | None = None, now: datetime | None = None) -> d
     season = season or default_season(checked_at)
     payload = _read_json(f"schedule_{season}.json")
     games = payload.get("games", []) if isinstance(payload, dict) else []
+    fetched_epoch = payload.get("fetched_at") if isinstance(payload, dict) else None
+    try:
+        fetched_at = datetime.fromtimestamp(float(fetched_epoch), timezone.utc)
+    except (TypeError, ValueError, OSError):
+        fetched_at = None
+    stale_after_seconds = max(
+        int(os.environ.get("SCHEDULE_FRESHNESS_MAX_AGE_SECONDS", str(6 * 3600))),
+        60,
+    )
+    age_seconds = (
+        round(max(0.0, (checked_at - fetched_at).total_seconds()), 1)
+        if fetched_at
+        else None
+    )
 
     counts = {"PRE": 0, "REG": 0, "POST": 0}
     for game in games:
@@ -338,6 +352,14 @@ def schedule_status(season: int | None = None, now: datetime | None = None) -> d
     return {
         "season": season,
         "ready": not issues,
+        "freshness_status": (
+            "unavailable"
+            if not games or fetched_at is None
+            else ("stale" if age_seconds > stale_after_seconds else "ready")
+        ),
+        "fetched_at": fetched_at.isoformat() if fetched_at else None,
+        "age_seconds": age_seconds,
+        "stale_after_seconds": stale_after_seconds,
         "total_games": len(games),
         "counts": counts,
         "current_week": current,

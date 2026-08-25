@@ -37,4 +37,4 @@ jobs:
         run: |
           curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors \
             https://nfl-analytics-hub.fly.dev/ready \
-            | python -c 'import json, sys; data = json.load(sys.stdin); assert data.get("ok") and data.get("schedule", {}).get("ready"), data'
+            | python -c 'import json, sys; data = json.load(sys.stdin); components = data.get("freshness", {}).get("components", {}); assert data.get("ok") and data.get("schedule", {}).get("ready") and {"schedule", "providers", "scheduler"}.issubset(components), data'
