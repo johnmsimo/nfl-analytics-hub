@@ -283,7 +283,14 @@ This repository is ready for a private GitHub repository and Fly.io deployment.
 - Database migration release command: `flask --app app db upgrade`
 - CI workflow: `.github/workflows/ci.yml`
 - Continuous deployment: `.github/workflows/fly.yml`
+- Main branch protection contract: `.github/MAIN_PROTECTION.md`
 - Deployment guide: `DEPLOY_FLY.md`
+
+Production deploys are accepted only for the exact current `main` commit after
+its push-triggered `CI / test` job succeeds. Pull requests into `main` must also
+pass the required `Quality and Security / quality` and
+`Quality and Security / analytics-tests` checks documented in the branch
+protection contract.
 
 The deployed architecture uses separate `web` and `worker` process groups. PostgreSQL and Redis connection strings must be configured as Fly secrets.
 

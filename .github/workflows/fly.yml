@@ -1,7 +1,6 @@
 name: Deploy to Fly.io
 
 on:
-  workflow_dispatch:
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -17,17 +16,29 @@ concurrency:
 jobs:
   deploy:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+      - name: Verify tested main commit
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$DEPLOY_SHA"
+          git fetch --no-tags --depth=1 \
+            origin main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = "$DEPLOY_SHA" || \
+            (echo "Refusing to deploy a superseded main commit" && exit 1)
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Verify deploy token
         run: test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
