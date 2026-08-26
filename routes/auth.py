@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, session
 
 from security import (
     authenticate_user,
+    current_role,
     establish_session,
     json_body,
     limiter,
@@ -66,11 +67,14 @@ def api_login():
 
 @auth_bp.route("/api/auth/session")
 def api_session():
+    role = current_role()
+    user = dict(session["user"])
+    user["role"] = role
     return jsonify(
         {
             "authenticated": True,
-            "user": session["user"],
-            "role": (session.get("user") or {}).get("role", "viewer"),
+            "user": user,
+            "role": role,
             "csrf_token": session["csrf_token"],
             "enterprise_tenant": session.get("enterprise_tenant"),
         }
