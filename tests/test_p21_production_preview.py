@@ -52,7 +52,7 @@ def test_workflow_is_manual_read_only_and_uses_existing_fly_secret():
     assert "RUN_READ_ONLY_PREVIEW" in workflow
     assert "environment: production" in workflow
     assert "secrets.FLY_API_TOKEN" in workflow
-    assert "python scripts/p21_production_preview.py" in workflow
+    assert "cd /app && PYTHONPATH=/app python scripts/p21_production_preview.py" in workflow
     assert "warehouse-retention/apply" not in workflow
     assert "player-identities/reconcile" not in workflow
     assert "ODDS_API_KEY" not in workflow

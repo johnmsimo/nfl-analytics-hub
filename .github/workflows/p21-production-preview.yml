@@ -43,4 +43,4 @@ jobs:
         shell: bash
         run: |
           flyctl ssh console --app nfl-analytics-hub --command \
-            "python scripts/p21_production_preview.py"
+            "cd /app && PYTHONPATH=/app python scripts/p21_production_preview.py"
