@@ -1,12 +1,16 @@
-"""Authentication, CSRF, distributed rate limiting, and security headers."""
+"""Authentication, MFA, role authorization, CSRF, rate limiting, and security headers."""
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import hmac
 import json
 import logging
 import os
 import secrets
+import struct
 import threading
 import time
 import uuid
@@ -16,6 +20,7 @@ from functools import wraps
 from typing import Any
 
 from flask import abort, g, jsonify, make_response, redirect, request, session, url_for
+from werkzeug.security import check_password_hash
 
 try:
     import redis
@@ -24,10 +29,207 @@ except ImportError:  # pragma: no cover
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 _PUBLIC_ENDPOINTS = {"login", "api_login", "health", "ready", "static"}
+_ROLES = {"viewer", "analyst", "admin", "owner"}
+_ADMIN_ROLES = {"admin", "owner"}
+_ADMIN_PAGE_PATHS = {"/settings", "/admin/data", "/model-operations", "/enterprise-operations"}
+_OWNER_ONLY_MUTATIONS = {
+    "/api/admin/player-identities/reconcile",
+    "/api/admin/warehouse-retention/apply",
+}
 
 
 def _is_production() -> bool:
     return os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).lower() == "production"
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _legacy_auth_user() -> dict[str, dict[str, str]]:
+    username = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
+    password = os.getenv("ADMIN_PASSWORD")
+    if not password:
+        if _is_production():
+            password = ""
+        else:
+            password = "nfl-dev"
+    return {
+        username: {
+            "username": username,
+            "name": os.getenv("ADMIN_DISPLAY_NAME", username.title()),
+            "role": "owner",
+            "password": password,
+            "password_hash": "",
+            "totp_secret": os.getenv("ADMIN_TOTP_SECRET", "").strip(),
+        }
+    }
+
+
+def configured_auth_users() -> dict[str, dict[str, str]]:
+    """Return validated auth records without ever logging their secrets."""
+    raw = os.getenv("AUTH_USERS_JSON", "").strip()
+    if not raw:
+        return _legacy_auth_user()
+    if len(raw) > 65536:
+        raise RuntimeError("AUTH_USERS_JSON exceeds the 64 KiB safety limit")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AUTH_USERS_JSON must contain valid JSON") from exc
+
+    if isinstance(parsed, dict):
+        records = []
+        for username, value in parsed.items():
+            if not isinstance(value, dict):
+                raise RuntimeError("AUTH_USERS_JSON user entries must be objects")
+            records.append({"username": username, **value})
+    elif isinstance(parsed, list):
+        records = parsed
+    else:
+        raise RuntimeError("AUTH_USERS_JSON must be an object or array")
+
+    if not records or len(records) > 50:
+        raise RuntimeError("AUTH_USERS_JSON must define between 1 and 50 users")
+
+    users: dict[str, dict[str, str]] = {}
+    for item in records:
+        if not isinstance(item, dict):
+            raise RuntimeError("AUTH_USERS_JSON user entries must be objects")
+        username = str(item.get("username", "")).strip()
+        if not username or len(username) > 128:
+            raise RuntimeError("every auth user needs a username of 1-128 characters")
+        if username in users:
+            raise RuntimeError("AUTH_USERS_JSON contains a duplicate username")
+
+        role = str(item.get("role", "viewer")).strip().lower()
+        if role not in _ROLES:
+            raise RuntimeError(f"unsupported auth role for {username}")
+
+        password = item.get("password")
+        password_hash = item.get("password_hash")
+        if bool(password) == bool(password_hash):
+            raise RuntimeError(f"{username} must define exactly one of password or password_hash")
+
+        users[username] = {
+            "username": username,
+            "name": str(item.get("name") or username),
+            "role": role,
+            "password": str(password or ""),
+            "password_hash": str(password_hash or ""),
+            "totp_secret": str(item.get("totp_secret") or "").strip(),
+        }
+    return users
+
+
+def validate_auth_configuration() -> dict[str, dict[str, str]]:
+    users = configured_auth_users()
+    require_mfa = _truthy_env("REQUIRE_MFA") or len(users) > 1
+    if require_mfa:
+        missing = [username for username, user in users.items() if not user["totp_secret"]]
+        if missing:
+            raise RuntimeError("MFA is required for every configured user when access expands beyond one account")
+    return users
+
+
+def authenticate_user(username: str, password: str) -> dict[str, str] | None:
+    users = configured_auth_users()
+    user = users.get(username)
+    if user is None:
+        hmac.compare_digest(password, secrets.token_hex(16))
+        return None
+
+    password_hash = user["password_hash"]
+    if password_hash:
+        try:
+            valid = check_password_hash(password_hash, password)
+        except ValueError:
+            valid = False
+    else:
+        expected = user["password"]
+        valid = bool(expected) and hmac.compare_digest(password, expected)
+    return user if valid else None
+
+
+def authenticate(username: str, password: str) -> bool:
+    """Backward-compatible boolean credential check."""
+    return authenticate_user(username, password) is not None
+
+
+def user_requires_mfa(user: dict[str, str]) -> bool:
+    users = configured_auth_users()
+    return bool(user.get("totp_secret")) or _truthy_env("REQUIRE_MFA") or len(users) > 1
+
+
+def verify_totp(secret: str, code: str, *, now: float | None = None, window: int = 1) -> bool:
+    code = str(code).strip()
+    if len(code) != 6 or not code.isdigit():
+        return False
+    cleaned = "".join(secret.split()).replace("-", "").upper()
+    if not cleaned:
+        return False
+    padding = "=" * ((8 - len(cleaned) % 8) % 8)
+    try:
+        key = base64.b32decode(cleaned + padding, casefold=True)
+    except (binascii.Error, ValueError):
+        return False
+    if len(key) < 10:
+        return False
+
+    timestamp = time.time() if now is None else now
+    counter = int(timestamp // 30)
+    for offset in range(-window, window + 1):
+        candidate_counter = counter + offset
+        if candidate_counter < 0:
+            continue
+        digest = hmac.new(key, struct.pack(">Q", candidate_counter), hashlib.sha1).digest()
+        dynamic_offset = digest[-1] & 0x0F
+        binary = struct.unpack(">I", digest[dynamic_offset : dynamic_offset + 4])[0] & 0x7FFFFFFF
+        candidate = f"{binary % 1_000_000:06d}"
+        if hmac.compare_digest(candidate, code):
+            return True
+    return False
+
+
+def verify_user_totp(user: dict[str, str], code: str) -> bool:
+    return verify_totp(user.get("totp_secret", ""), code)
+
+
+def current_role() -> str:
+    user = session.get("user") or {}
+    role = str(user.get("role") or "").lower()
+    if role in _ROLES:
+        return role
+    if user.get("username") == os.getenv("ADMIN_USERNAME", "admin"):
+        return "owner"
+    return "viewer"
+
+
+def require_roles(*roles: str) -> Callable:
+    allowed = set(roles)
+    if not allowed or not allowed.issubset(_ROLES):
+        raise ValueError("require_roles received an unsupported role")
+
+    def decorator(fn: Callable) -> Callable:
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            role = current_role()
+            if role not in allowed:
+                return (
+                    jsonify(
+                        {
+                            "error": "insufficient role",
+                            "code": "ROLE_REQUIRED",
+                            "required_roles": sorted(allowed),
+                        }
+                    ),
+                    403,
+                )
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
 
 
 def _configure_logging(app) -> None:
@@ -63,6 +265,8 @@ def configure_security(app) -> None:
         if _is_production():
             raise RuntimeError("SECRET_KEY is required in production")
         secret = "dev-only-change-me-" + secrets.token_hex(16)
+
+    validate_auth_configuration()
     app.config.update(
         SECRET_KEY=secret,
         SESSION_COOKIE_HTTPONLY=True,
@@ -115,13 +319,29 @@ def configure_security(app) -> None:
         ):
             return None
         if os.getenv("AUTH_DISABLED", "0") == "1" and not _is_production():
-            session.setdefault("user", {"username": "developer", "name": "Developer"})
+            session.setdefault(
+                "user",
+                {"username": "developer", "name": "Developer", "role": "owner"},
+            )
             session.setdefault("csrf_token", secrets.token_urlsafe(32))
             return None
         if not session.get("user"):
             if request.path.startswith("/api/"):
                 return jsonify({"error": "authentication required", "code": "AUTH_REQUIRED"}), 401
             return redirect(url_for("login", next=request.full_path.rstrip("?")))
+
+        role = current_role()
+        if request.path.startswith("/api/admin/") or request.path in _ADMIN_PAGE_PATHS:
+            if role not in _ADMIN_ROLES:
+                if request.path.startswith("/api/"):
+                    return jsonify({"error": "administrator role required", "code": "ROLE_REQUIRED"}), 403
+                abort(403)
+        if request.path in _OWNER_ONLY_MUTATIONS and request.method in _MUTATING and role != "owner":
+            return jsonify({"error": "owner role required", "code": "OWNER_REQUIRED"}), 403
+
+        if role == "viewer" and request.method in _MUTATING and request.path != "/api/auth/logout":
+            return jsonify({"error": "viewer role is read-only", "code": "READ_ONLY_ROLE"}), 403
+
         if request.method in _MUTATING:
             expected = session.get("csrf_token")
             supplied = request.headers.get("X-CSRF-Token")
@@ -149,23 +369,25 @@ def configure_security(app) -> None:
         return resp
 
 
-def authenticate(username: str, password: str) -> bool:
-    expected_user = os.getenv("ADMIN_USERNAME", "admin")
-    expected_pass = os.getenv("ADMIN_PASSWORD")
-    if not expected_pass:
-        if _is_production():
-            return False
-        expected_pass = "nfl-dev"
-    return hmac.compare_digest(username, expected_user) and hmac.compare_digest(password, expected_pass)
-
-
-def establish_session(username: str) -> dict[str, str]:
-    user = {"username": username, "name": os.getenv("ADMIN_DISPLAY_NAME", username.title())}
+def establish_session(user: str | dict[str, str]) -> dict[str, str]:
+    if isinstance(user, str):
+        record = configured_auth_users().get(user) or {
+            "username": user,
+            "name": os.getenv("ADMIN_DISPLAY_NAME", user.title()),
+            "role": "owner",
+        }
+    else:
+        record = user
+    public_user = {
+        "username": str(record["username"]),
+        "name": str(record.get("name") or record["username"]),
+        "role": str(record.get("role") or "viewer"),
+    }
     session.clear()
     session.permanent = True
-    session["user"] = user
+    session["user"] = public_user
     session["csrf_token"] = secrets.token_urlsafe(32)
-    return user
+    return public_user
 
 
 def json_body(*, allowed: set[str] | None = None, required: set[str] | None = None) -> dict[str, Any]:
