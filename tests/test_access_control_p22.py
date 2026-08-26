@@ -87,6 +87,21 @@ def test_legacy_single_admin_remains_owner_without_mfa(monkeypatch):
     assert session_response.get_json()["role"] == "owner"
 
 
+def test_pre_upgrade_legacy_session_is_normalized_to_owner(monkeypatch):
+    app = _app(monkeypatch)
+    client = app.test_client()
+
+    with client.session_transaction() as sess:
+        sess["user"] = {"username": "owner", "name": "Owner"}
+        sess["csrf_token"] = "csrf-test-token"
+
+    response = client.get("/api/auth/session")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["role"] == "owner"
+    assert payload["user"]["role"] == "owner"
+
+
 def test_expanded_access_fails_closed_without_mfa_secrets(monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("SECRET_KEY", "p2-2-test-secret-key")
