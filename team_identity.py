@@ -1,14 +1,14 @@
 """Canonical team identity for the warehouse.
 
-Two abbreviation conventions meet in this app. The disk cache under ``data/``
-carries ESPN codes (``JAX``, ``WSH``) because ``nfl_data.py`` is ESPN-backed,
-while the nflverse release assets read by ``external_providers.py`` and the
-contract in ``coverage_service.EXPECTED_TEAMS`` use ``JAC`` and ``WAS``.
+Provider feeds do not agree on every NFL abbreviation. ESPN-backed cache files,
+nflverse releases, historical relocation data, and older NFL/PFR identifiers all
+need to collapse onto the same 32 current-franchise rows.
 
 Warehouse writers must funnel every abbreviation through :func:`normalize_team`
-so one franchise owns exactly one ``Team`` row. Without it the ESPN importer
-creates ``JAX``/``WSH`` and the nflverse importer then looks up ``JAC``/``WAS``,
-silently dropping every Jacksonville and Washington row it was asked to load.
+so one franchise owns exactly one ``Team`` row. This is especially important for
+rosters: an unrecognized alias silently drops every player-team membership for
+that franchise and turns an otherwise healthy player warehouse into 31/32 team
+coverage.
 
 This module is deliberately warehouse-only: ``nfl_data.py`` keeps speaking ESPN
 codes so cached files and frontend logo URLs stay valid.
@@ -16,11 +16,21 @@ codes so cached files and frontend logo URLs stay valid.
 
 from __future__ import annotations
 
-# ESPN and legacy relocation codes -> nflverse canonical abbreviation.
+# Provider / historical aliases -> warehouse canonical abbreviation.
+#
+# The ARZ/BLT/CLV/HST spellings are documented by nflverse's own team
+# abbreviation mapping and still surface in upstream roster-related datasets.
+# Relocation aliases stay here as well because historical provider rows may be
+# replayed into the current warehouse.
 TEAM_ALIASES = {
+    "ARZ": "ARI",
+    "BLT": "BAL",
+    "CLV": "CLE",
+    "HST": "HOU",
     "JAX": "JAC",
     "WSH": "WAS",
     "LA": "LAR",
+    "SL": "LAR",
     "STL": "LAR",
     "SD": "LAC",
     "OAK": "LV",
