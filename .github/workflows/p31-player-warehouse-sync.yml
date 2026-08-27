@@ -1,0 +1,59 @@
+name: P3.1 Player Warehouse Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_mutation:
+        description: Confirm this run may populate the 2026 production player warehouse from nflverse roster data
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_PLAYER_WAREHOUSE_SYNC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p31-player-warehouse-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: inputs.confirm_mutation == 'RUN_PLAYER_WAREHOUSE_SYNC'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      P31_SEASON: '2026'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate P3.1 controls
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirm_mutation }}" = "RUN_PLAYER_WAREHOUSE_SYNC"
+
+      - name: Verify production readiness
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 --retry-all-errors \
+            https://nfl-analytics-hub.fly.dev/ready \
+            | python -c 'import json, sys; data=json.load(sys.stdin); schedule=data.get("schedule", {}); current=schedule.get("current_week", {}); assert data.get("ok") and data.get("database") == "ready" and schedule.get("ready") and current.get("season") == 2026, data'
+
+      - name: Populate and verify player warehouse
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app P31_SEASON=2026 python /app/scripts/p31_player_warehouse_sync.py"
+
+      - name: Re-run sanitized P2/P3 safety verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"
