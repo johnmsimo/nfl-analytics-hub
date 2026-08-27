@@ -16,6 +16,7 @@ instance/
 *.sqlite3
 data/*.parquet
 data/*.csv
+!data/player_week_2025.csv
 data/raw/
 artifacts/
 *.zip
