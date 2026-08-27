@@ -24,19 +24,25 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Lint production v3.2 surfaces
+      - name: Repository-wide Python correctness lint
+        run: ruff check . --select E9,F63,F7,F82 --output-format=github
+      - name: Strict lint modern production surfaces
         run: >-
           ruff check
+          api_lifecycle.py
           database.py
           realtime_v32.py
+          routes/current_api.py
           routes/v32_api.py
           routes/v32_release_api.py
           v32_release.py
-      - name: Check production v3.2 formatting
+      - name: Check modern production formatting
         run: >-
           ruff format --check
+          api_lifecycle.py
           database.py
           realtime_v32.py
+          routes/current_api.py
           routes/v32_api.py
           routes/v32_release_api.py
           v32_release.py
@@ -63,4 +69,4 @@ jobs:
           --cov=analytics_engine.platform_v31
           --cov=analytics_engine.intelligence_v31
           --cov=analytics_engine.models
-          --cov-fail-under=85
+          --cov-fail-under=90
