@@ -19,6 +19,31 @@ def test_height_normalization_accepts_roster_formats():
     assert player_warehouse._height_inches("unknown") is None
 
 
+def test_sync_rosters_uses_live_2026_release(app_fixture, monkeypatch):
+    seen: dict[str, str] = {}
+
+    def fake_download(url: str):
+        seen["url"] = url
+        return iter(())
+
+    monkeypatch.setattr(player_warehouse, "_download_csv", fake_download)
+    monkeypatch.setattr(player_warehouse, "_source", lambda: object())
+    monkeypatch.setattr(player_warehouse, "_start_run", lambda dataset, season: object())
+    monkeypatch.setattr(player_warehouse, "prime_raw_cache", lambda source, entity: None)
+    monkeypatch.setattr(player_warehouse, "prime_player_index", lambda: 0)
+    monkeypatch.setattr(player_warehouse, "_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(player_warehouse, "clear_raw_cache", lambda: None)
+    monkeypatch.setattr(player_warehouse, "clear_player_index", lambda: None)
+
+    with app_fixture.app_context():
+        player_warehouse.sync_rosters(2026)
+
+    assert seen["url"] == (
+        "https://github.com/nflverse/nflverse-data/releases/download/"
+        "weekly_rosters/roster_weekly_2026.csv"
+    )
+
+
 def test_hydrate_player_fills_projection_ready_bio(app_fixture):
     with app_fixture.app_context():
         try:
