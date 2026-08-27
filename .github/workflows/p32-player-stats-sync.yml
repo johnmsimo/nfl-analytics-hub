@@ -1,0 +1,60 @@
+name: P3.2 Player Stats Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_mutation:
+        description: Confirm this run may populate historical/current production player statistics from bundled data and ESPN public boxscores
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_PLAYER_STATS_SYNC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p32-player-stats-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: inputs.confirm_mutation == 'RUN_PLAYER_STATS_SYNC'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      P32_TARGET_SEASON: '2026'
+      P32_BASELINE_SEASON: '2025'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate P3.2 controls
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirm_mutation }}" = "RUN_PLAYER_STATS_SYNC"
+
+      - name: Verify production readiness
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 --retry-all-errors \
+            https://nfl-analytics-hub.fly.dev/ready \
+            | python -c 'import json, sys; data=json.load(sys.stdin); schedule=data.get("schedule", {}); current=schedule.get("current_week", {}); assert data.get("ok") and data.get("database") == "ready" and schedule.get("ready") and current.get("season") == 2026, data'
+
+      - name: Populate and verify player statistics
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app P32_TARGET_SEASON=2026 P32_BASELINE_SEASON=2025 python /app/scripts/p32_player_stats_sync.py"
+
+      - name: Re-run sanitized P2/P3 safety verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"
