@@ -22,6 +22,8 @@ from typing import Any
 from flask import abort, g, jsonify, make_response, redirect, request, session, url_for
 from werkzeug.security import check_password_hash
 
+from api_lifecycle import lifecycle_headers
+
 try:
     import redis
 except ImportError:  # pragma: no cover
@@ -284,14 +286,18 @@ def configure_security(app) -> None:
         g.enterprise_api_key = None
         supplied_api_key = request.headers.get("X-API-Key")
         if supplied_api_key:
+            current_delivery = request.path == "/api/current/deliveries" or request.path.startswith(
+                "/api/current/deliveries/"
+            )
             if not (
                 request.path.startswith("/api/v4.4/")
                 or request.path.startswith("/api/v4.5/")
+                or current_delivery
             ):
                 return (
                     jsonify(
                         {
-                            "error": "API keys are limited to v4.4 enterprise routes",
+                            "error": "API keys are limited to enterprise decision and delivery routes",
                             "code": "API_KEY_ROUTE_UNSUPPORTED",
                         }
                     ),
@@ -366,6 +372,8 @@ def configure_security(app) -> None:
             resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         if request.path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
+        for header, value in lifecycle_headers(request.path).items():
+            resp.headers.setdefault(header, value)
         return resp
 
 
