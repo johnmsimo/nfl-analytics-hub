@@ -14,6 +14,7 @@ def test_espn_codes_map_to_the_nflverse_canon():
 
 
 def test_nflverse_documented_alternate_codes_map_to_canon():
+    assert normalize_team("AZ") == "ARI"
     assert normalize_team("ARZ") == "ARI"
     assert normalize_team("BLT") == "BAL"
     assert normalize_team("CLV") == "CLE"
@@ -40,7 +41,7 @@ def test_canonical_codes_and_whitespace_are_stable():
 
 def test_both_importers_agree_on_the_canon():
     """The nflverse importer must resolve what the ESPN importer writes."""
-    for provider_code in ("JAX", "WSH", "ARZ", "BLT", "CLV", "HST", "SEA"):
+    for provider_code in ("JAX", "WSH", "AZ", "ARZ", "BLT", "CLV", "HST", "SEA"):
         assert _team(provider_code) == normalize_team(provider_code)
 
 
@@ -66,7 +67,7 @@ def test_seed_never_creates_espn_or_placeholder_rows(app_fixture):
     with app_fixture.app_context():
         stored = {t.abbreviation for t in db.session.scalars(db.select(Team)).all()}
     leaked = stored & {
-        "JAX", "WSH", "ARZ", "BLT", "CLV", "HST",
+        "JAX", "WSH", "AZ", "ARZ", "BLT", "CLV", "HST",
         "AFC", "NFC", "TBD", "TBA", "NFL", "LA", "SL", "STL", "SD", "OAK",
     }
     assert not leaked, f"non-canonical team rows ingested: {leaked}"
