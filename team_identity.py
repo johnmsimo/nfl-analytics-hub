@@ -18,11 +18,11 @@ from __future__ import annotations
 
 # Provider / historical aliases -> warehouse canonical abbreviation.
 #
-# The ARZ/BLT/CLV/HST spellings are documented by nflverse's own team
-# abbreviation mapping and still surface in upstream roster-related datasets.
+# The AZ/ARZ/BLT/CLV/HST spellings surface in upstream roster-related datasets.
 # Relocation aliases stay here as well because historical provider rows may be
 # replayed into the current warehouse.
 TEAM_ALIASES = {
+    "AZ": "ARI",
     "ARZ": "ARI",
     "BLT": "BAL",
     "CLV": "CLE",
