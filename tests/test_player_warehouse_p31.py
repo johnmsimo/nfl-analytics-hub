@@ -36,12 +36,14 @@ def test_sync_rosters_uses_live_2026_release(app_fixture, monkeypatch):
     monkeypatch.setattr(player_warehouse, "clear_player_index", lambda: None)
 
     with app_fixture.app_context():
-        player_warehouse.sync_rosters(2026)
+        result = player_warehouse.sync_rosters(2026)
 
     assert seen["url"] == (
         "https://github.com/nflverse/nflverse-data/releases/download/"
         "weekly_rosters/roster_weekly_2026.csv"
     )
+    assert result["unmatched_team_codes"] == {}
+    assert result["missing_player_rows"] == 0
 
 
 def test_hydrate_player_fills_projection_ready_bio(app_fixture):
@@ -130,6 +132,7 @@ def test_player_warehouse_snapshot_enforces_coverage(app_fixture, monkeypatch):
             assert snapshot["ok"] is True
             assert snapshot["rostered_players"] == 2
             assert snapshot["teams_covered"] == 2
+            assert snapshot["rostered_team_abbreviations"] == ["P31A", "P31B"]
             assert snapshot["identity_coverage"] == 1.0
             assert snapshot["nflverse_identity_coverage"] == 1.0
             assert snapshot["position_coverage"] == 1.0
@@ -157,7 +160,13 @@ def test_population_wrapper_uses_rosters_only(monkeypatch):
     assert result["ok"] is True
     assert result["provider"] == "nflverse"
     assert result["dataset"] == "rosters"
-    assert result["sync"] == {"read": 1500, "written": 1500}
+    assert result["sync"] == {
+        "read": 1500,
+        "written": 1500,
+        "skipped": 0,
+        "missing_player_rows": 0,
+        "unmatched_team_codes": {},
+    }
 
 
 def test_p31_workflow_is_protected_and_public_roster_only():

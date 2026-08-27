@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy import distinct, func, select
 
+from coverage_service import EXPECTED_TEAMS
 from database import db
 from db_models import (
     DataSyncRun,
@@ -106,6 +107,8 @@ def sync_rosters(season: int) -> dict[str, Any]:
     url = _weekly_roster_url(season)
     teams = {team.abbreviation: team for team in db.session.scalars(select(Team)).all()}
     read = written = skipped = 0
+    missing_player_rows = 0
+    unmatched_team_codes: dict[str, int] = {}
 
     try:
         if not db.session.get(Season, season):
@@ -114,7 +117,14 @@ def sync_rosters(season: int) -> dict[str, Any]:
         for row in _download_csv(url):
             read += 1
             player = _ensure_player(row)
-            team = teams.get(normalize_team(row.get("team")) or "")
+            raw_team_code = str(row.get("team") or "").strip().upper()
+            canonical_team = normalize_team(raw_team_code)
+            team = teams.get(canonical_team or "")
+            if not player:
+                missing_player_rows += 1
+            if not team:
+                diagnostic_code = raw_team_code or "<blank>"
+                unmatched_team_codes[diagnostic_code] = unmatched_team_codes.get(diagnostic_code, 0) + 1
             if not player or not team:
                 skipped += 1
                 continue
@@ -156,6 +166,8 @@ def sync_rosters(season: int) -> dict[str, Any]:
             "read": read,
             "written": written,
             "skipped": skipped,
+            "missing_player_rows": missing_player_rows,
+            "unmatched_team_codes": dict(sorted(unmatched_team_codes.items())),
             "url": url,
         }
     except Exception as exc:
@@ -252,14 +264,18 @@ def player_warehouse_snapshot(season: int) -> dict[str, Any]:
         PlayerTeamSeason.season == season
     ).subquery()
     rostered_players = int(db.session.scalar(select(func.count()).select_from(roster_ids)) or 0)
-    teams_covered = int(
-        db.session.scalar(
-            select(func.count(distinct(PlayerTeamSeason.team_id))).where(
-                PlayerTeamSeason.season == season
-            )
-        )
-        or 0
-    )
+    rostered_team_abbreviations = {
+        value
+        for value in db.session.scalars(
+            select(Team.abbreviation)
+            .join(PlayerTeamSeason, PlayerTeamSeason.team_id == Team.id)
+            .where(PlayerTeamSeason.season == season)
+            .distinct()
+        ).all()
+        if value
+    }
+    teams_covered = len(rostered_team_abbreviations)
+    missing_expected_teams = sorted(set(EXPECTED_TEAMS) - rostered_team_abbreviations)
     total_players = int(db.session.scalar(select(func.count()).select_from(Player)) or 0)
     total_identities = int(
         db.session.scalar(select(func.count()).select_from(PlayerExternalIdentity)) or 0
@@ -315,6 +331,8 @@ def player_warehouse_snapshot(season: int) -> dict[str, Any]:
         "total_identities": total_identities,
         "rostered_players": rostered_players,
         "teams_covered": teams_covered,
+        "rostered_team_abbreviations": sorted(rostered_team_abbreviations),
+        "missing_expected_teams": missing_expected_teams,
         "rostered_with_identity": rostered_with_identity,
         "rostered_with_nflverse_identity": rostered_with_nflverse,
         "rostered_with_position": rostered_with_position,
@@ -345,6 +363,9 @@ def populate_player_warehouse(season: int) -> dict[str, Any]:
         "sync": {
             "read": int(roster_sync.get("read") or 0),
             "written": int(roster_sync.get("written") or 0),
+            "skipped": int(roster_sync.get("skipped") or 0),
+            "missing_player_rows": int(roster_sync.get("missing_player_rows") or 0),
+            "unmatched_team_codes": roster_sync.get("unmatched_team_codes") or {},
         },
         "normalization": normalization,
         "warehouse": snapshot,
