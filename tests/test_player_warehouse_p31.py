@@ -56,9 +56,11 @@ def test_player_warehouse_snapshot_enforces_coverage(app_fixture, monkeypatch):
     monkeypatch.setenv("P31_MIN_IDENTITY_COVERAGE", "1.0")
     monkeypatch.setenv("P31_MIN_NFLVERSE_COVERAGE", "1.0")
     monkeypatch.setenv("P31_MIN_POSITION_COVERAGE", "1.0")
-    season = 2099
 
     with app_fixture.app_context():
+        db.session.rollback()
+        existing_years = list(db.session.scalars(db.select(Season.year)).all())
+        season = (max(existing_years) if existing_years else 2026) + 1000
         try:
             db.session.add(Season(year=season))
             teams = [
