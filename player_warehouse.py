@@ -1,9 +1,10 @@
 """P3.1 production player warehouse population and coverage verification.
 
-The existing nflverse roster importer owns provider retrieval and provenance.
-This module layers a deterministic normalization/coverage contract on top of it
-so production can prove that player rows, team memberships, and source-scoped
-identities are actually usable before projection work begins.
+P3.1 reads the nflverse weekly-roster release directly. That keeps production
+independent from nflreadpy's packaged current-season guard, which can lag the
+live nflverse release calendar even when the new-season asset already exists.
+The module preserves the same provenance, identity, team-season, and coverage
+contracts used by the existing external-provider importer.
 """
 
 from __future__ import annotations
@@ -15,9 +16,27 @@ from typing import Any
 from sqlalchemy import distinct, func, select
 
 from database import db
-from db_models import Player, PlayerExternalIdentity, PlayerTeamSeason, RawIngestRecord, Team
-from external_providers import sync_rosters
+from db_models import (
+    DataSyncRun,
+    Player,
+    PlayerExternalIdentity,
+    PlayerTeamSeason,
+    RawIngestRecord,
+    Season,
+    Team,
+)
+from external_providers import (
+    NFLVERSE_BASE,
+    _download_csv,
+    _ensure_player,
+    _finish,
+    _source,
+    _start_run,
+    clear_player_index,
+    prime_player_index,
+)
 from player_identity import nflverse_identities, resolve_player
+from source_registry import capture_raw, clear_raw_cache, prime_raw_cache
 from team_identity import normalize_team
 
 
@@ -71,6 +90,84 @@ def _display_name(payload: dict[str, Any]) -> str:
         or payload.get("name")
         or ""
     ).strip()
+
+
+def _weekly_roster_url(season: int) -> str:
+    """Return the live nflverse weekly-roster CSV for a season."""
+    return f"{NFLVERSE_BASE}/weekly_rosters/roster_weekly_{season}.csv"
+
+
+def sync_rosters(season: int) -> dict[str, Any]:
+    """Import weekly rosters directly from nflverse without package season guards."""
+    source = _source()
+    run = _start_run("rosters", season)
+    prime_raw_cache(source, "roster")
+    prime_player_index()
+    url = _weekly_roster_url(season)
+    teams = {team.abbreviation: team for team in db.session.scalars(select(Team)).all()}
+    read = written = skipped = 0
+
+    try:
+        if not db.session.get(Season, season):
+            db.session.add(Season(year=season))
+
+        for row in _download_csv(url):
+            read += 1
+            player = _ensure_player(row)
+            team = teams.get(normalize_team(row.get("team")) or "")
+            if not player or not team:
+                skipped += 1
+                continue
+
+            link = db.session.scalar(
+                select(PlayerTeamSeason).where(
+                    PlayerTeamSeason.player_id == player.id,
+                    PlayerTeamSeason.team_id == team.id,
+                    PlayerTeamSeason.season == season,
+                )
+            )
+            if not link:
+                link = PlayerTeamSeason(
+                    player_id=player.id,
+                    team_id=team.id,
+                    season=season,
+                )
+                db.session.add(link)
+
+            link.jersey_number = str(row.get("jersey_number") or "") or None
+            link.depth_position = row.get("depth_chart_position")
+            link.status = row.get("status")
+            capture_raw(
+                source,
+                "roster",
+                f"{season}:{team.abbreviation}:{player.external_id}:{row.get('week')}",
+                row,
+                season=season,
+                week=_int(row.get("week")),
+            )
+            written += 1
+
+        db.session.commit()
+        _finish(run, source, read, written)
+        return {
+            "provider": "nflverse",
+            "dataset": "rosters",
+            "season": season,
+            "read": read,
+            "written": written,
+            "skipped": skipped,
+            "url": url,
+        }
+    except Exception as exc:
+        db.session.rollback()
+        source = _source()
+        persisted_run = db.session.get(DataSyncRun, run.id)
+        run = persisted_run or _start_run("rosters", season)
+        _finish(run, source, read, written, exc)
+        raise
+    finally:
+        clear_raw_cache()
+        clear_player_index()
 
 
 def _hydrate_player(player: Player, payload: dict[str, Any]) -> None:
