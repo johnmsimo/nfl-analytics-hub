@@ -16,24 +16,40 @@ from api_lifecycle import capability_manifest
 current_api_bp = Blueprint("current_api", __name__, url_prefix="/api/current")
 
 
+def _domain_capabilities(domain: str):
+    manifest = capability_manifest()
+    return jsonify(
+        {
+            "contract": manifest["contract"],
+            "domain": domain,
+            **manifest["domains"][domain],
+        }
+    )
+
+
 @current_api_bp.get("/capabilities")
 def capabilities():
     return jsonify(capability_manifest())
 
 
-@current_api_bp.get("/<domain>/capabilities")
-def domain_capabilities(domain: str):
-    manifest = capability_manifest()
-    domains = manifest["domains"]
-    if domain not in {"intelligence", "analytics", "realtime", "deliveries"}:
-        return jsonify({"error": "unknown API domain", "code": "UNKNOWN_API_DOMAIN"}), 404
-    return jsonify(
-        {
-            "contract": manifest["contract"],
-            "domain": domain,
-            **domains[domain],
-        }
-    )
+@current_api_bp.get("/intelligence/capabilities")
+def intelligence_capabilities():
+    return _domain_capabilities("intelligence")
+
+
+@current_api_bp.get("/analytics/capabilities")
+def analytics_capabilities():
+    return _domain_capabilities("analytics")
+
+
+@current_api_bp.get("/realtime/capabilities")
+def realtime_capabilities():
+    return _domain_capabilities("realtime")
+
+
+@current_api_bp.get("/deliveries/capabilities")
+def delivery_capabilities():
+    return _domain_capabilities("deliveries")
 
 
 @dataclass(frozen=True)
