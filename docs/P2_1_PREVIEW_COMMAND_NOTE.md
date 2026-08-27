@@ -1,0 +1,1 @@
+The P2.1 production preview must be invoked through an executable command because Fly SSH command execution does not evaluate shell built-ins. The workflow uses `/usr/bin/env PYTHONPATH=/app python /app/scripts/p21_production_preview.py`.
