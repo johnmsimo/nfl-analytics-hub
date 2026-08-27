@@ -57,6 +57,17 @@ def test_current_capabilities_is_the_single_discovery_entrypoint(client):
         "deliveries",
     }
     assert "Deprecation" not in response.headers
+    assert payload["domains"]["deliveries"]["endpoints"]
+
+
+def test_domain_capabilities_are_canonical_not_legacy_payloads(client):
+    response = client.get("/api/current/realtime/capabilities")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["contract"] == "2026.1"
+    assert payload["domain"] == "realtime"
+    assert payload["canonical_base"] == "/api/current/realtime"
+    assert all("/api/current/" in endpoint for endpoint in payload["endpoints"])
 
 
 def test_v2_legacy_route_and_current_alias_share_behavior(client):
@@ -91,7 +102,7 @@ def test_v32_legacy_route_and_current_alias_share_behavior(client):
     assert legacy.status_code == current.status_code == 200
     assert legacy.get_json() == current.get_json()
     assert legacy.headers["Deprecation"] == "true"
-    assert legacy.headers["X-API-Canonical-Base"] == "/api/current/realtime"
+    assert legacy.headers["X-API-Canonical-Base"] == "/api/current"
 
 
 def test_v45_remains_stable_compatibility_not_deprecated(client):
