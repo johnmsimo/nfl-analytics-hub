@@ -10,8 +10,16 @@ from routes.current_api import ALIASES
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _rule_for(app, rule_text: str):
-    return next((rule for rule in app.url_map.iter_rules() if rule.rule == rule_text), None)
+def _rule_for(app, rule_text: str, methods: tuple[str, ...]):
+    expected = set(methods)
+    return next(
+        (
+            rule
+            for rule in app.url_map.iter_rules()
+            if rule.rule == rule_text and expected.issubset(rule.methods)
+        ),
+        None,
+    )
 
 
 def test_canonical_manifest_consolidates_expected_generations():
@@ -39,8 +47,8 @@ def test_every_canonical_alias_reuses_source_view_function(app_fixture):
     for spec in ALIASES:
         source = app_fixture.view_functions.get(spec.endpoint)
         assert source is not None, spec.endpoint
-        rule = _rule_for(app_fixture, spec.rule)
-        assert rule is not None, spec.rule
+        rule = _rule_for(app_fixture, spec.rule, spec.methods)
+        assert rule is not None, f"{spec.methods} {spec.rule}"
         assert app_fixture.view_functions[rule.endpoint] is source
 
 
