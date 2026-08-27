@@ -129,6 +129,7 @@ def test_scheduler_freshness_uses_job_cadence(app_fixture, monkeypatch):
         assert report["jobs"][0]["status"] == "ready"
 
         row.last_finished_at = now - timedelta(hours=3)
+        row.next_run_at = now - timedelta(minutes=1)
         db.session.commit()
         report = production_freshness.scheduler_freshness(now)
         assert report["status"] == "stale"
@@ -137,6 +138,41 @@ def test_scheduler_freshness_uses_job_cadence(app_fixture, monkeypatch):
         db.session.commit()
         report = production_freshness.scheduler_freshness(now)
         assert report["status"] == "degraded"
+        db.session.query(ScheduledJob).delete()
+        db.session.commit()
+
+
+def test_scheduler_restart_with_expired_history_is_pending(app_fixture, monkeypatch):
+    """A newly registered future run supersedes only expired pre-restart history."""
+    now = datetime(2026, 8, 27, 2, 30, tzinfo=UTC)
+    monkeypatch.setenv("SCHEDULER_EXPECTED", "true")
+    monkeypatch.setattr(production_freshness, "_job_enabled", lambda key: key == "cached-data-sync")
+    monkeypatch.setattr(production_freshness, "_job_minutes", lambda _key: 60)
+
+    with app_fixture.app_context():
+        db.session.query(ScheduledJob).delete()
+        row = ScheduledJob(
+            key="cached-data-sync",
+            name="Cached data sync",
+            cron="every 60 minutes",
+            enabled=True,
+            last_status="failed",
+            last_finished_at=now - timedelta(hours=3),
+            next_run_at=now + timedelta(minutes=49),
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        report = production_freshness.scheduler_freshness(now)
+        assert report["status"] == "ready"
+        assert report["jobs"][0]["status"] == "pending"
+
+        row.last_finished_at = now - timedelta(minutes=10)
+        db.session.commit()
+        report = production_freshness.scheduler_freshness(now)
+        assert report["status"] == "degraded"
+        assert report["jobs"][0]["status"] == "degraded"
+
         db.session.query(ScheduledJob).delete()
         db.session.commit()
 
