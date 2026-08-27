@@ -118,10 +118,7 @@ def normalize_roster_records(season: int) -> dict[str, int]:
         )
         .order_by(RawIngestRecord.ingested_at, RawIngestRecord.id)
     ).all()
-    teams = {
-        team.abbreviation: team
-        for team in db.session.scalars(select(Team)).all()
-    }
+    teams = {team.abbreviation: team for team in db.session.scalars(select(Team)).all()}
     processed = normalized = skipped = 0
     try:
         for raw in rows:
@@ -154,7 +151,7 @@ def normalize_roster_records(season: int) -> dict[str, int]:
 
 def player_warehouse_snapshot(season: int) -> dict[str, Any]:
     """Return aggregate-only player coverage metrics safe for CI logs."""
-    roster_ids = select(distinct(PlayerTeamSeason.player_id)).where(
+    roster_ids = select(distinct(PlayerTeamSeason.player_id).label("player_id")).where(
         PlayerTeamSeason.season == season
     ).subquery()
     rostered_players = int(db.session.scalar(select(func.count()).select_from(roster_ids)) or 0)
