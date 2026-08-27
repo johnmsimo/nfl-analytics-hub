@@ -36,16 +36,11 @@ jobs:
           routes/v32_api.py
           routes/v32_release_api.py
           v32_release.py
-      - name: Check modern production formatting
-        run: >-
-          ruff format --check
-          api_lifecycle.py
-          database.py
-          realtime_v32.py
-          routes/current_api.py
-          routes/v32_api.py
-          routes/v32_release_api.py
-          v32_release.py
+      - name: Show canonical API formatter diff
+        run: |
+          ruff format --check api_lifecycle.py database.py realtime_v32.py routes/v32_api.py routes/v32_release_api.py v32_release.py
+          ruff format --diff routes/current_api.py
+          exit 1
       - run: mypy analytics_engine routes/analytics_api.py
       - run: bandit -q -r . -x tests,migrations,.venv --skip B101,B104,B105,B106,B110,B311,B324
       - run: pip-audit -r requirements.txt
