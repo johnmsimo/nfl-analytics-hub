@@ -21,6 +21,21 @@ def capabilities():
     return jsonify(capability_manifest())
 
 
+@current_api_bp.get("/<domain>/capabilities")
+def domain_capabilities(domain: str):
+    manifest = capability_manifest()
+    domains = manifest["domains"]
+    if domain not in {"intelligence", "analytics", "realtime", "deliveries"}:
+        return jsonify({"error": "unknown API domain", "code": "UNKNOWN_API_DOMAIN"}), 404
+    return jsonify(
+        {
+            "contract": manifest["contract"],
+            "domain": domain,
+            **domains[domain],
+        }
+    )
+
+
 @dataclass(frozen=True)
 class AliasSpec:
     endpoint: str
@@ -46,7 +61,6 @@ ALIASES: tuple[AliasSpec, ...] = (
         "intelligence",
     ),
     # v3.1 dependency-light analytics
-    AliasSpec("analytics_api.capabilities", "/api/current/analytics/capabilities", ("GET",), "analytics"),
     AliasSpec("analytics_api.win_probability", "/api/current/analytics/win-probability", ("POST",), "analytics"),
     AliasSpec("analytics_api.epa", "/api/current/analytics/epa", ("POST",), "analytics"),
     AliasSpec("analytics_api.drives", "/api/current/analytics/drives", ("POST",), "analytics"),
@@ -63,7 +77,6 @@ ALIASES: tuple[AliasSpec, ...] = (
     AliasSpec("analytics_api.assistant", "/api/current/analytics/assistant", ("POST",), "analytics"),
     AliasSpec("analytics_api.watchlist", "/api/current/analytics/watchlist", ("POST",), "analytics"),
     # v3.2 real-time/discovery
-    AliasSpec("v32_api.capabilities", "/api/current/realtime/capabilities", ("GET",), "realtime"),
     AliasSpec("v32_api.events", "/api/current/realtime/events", ("GET",), "realtime"),
     AliasSpec("v32_api.publish_event", "/api/current/realtime/events/publish", ("POST",), "realtime"),
     AliasSpec("v32_api.preferences", "/api/current/realtime/preferences/normalize", ("POST",), "realtime"),
@@ -79,7 +92,6 @@ ALIASES: tuple[AliasSpec, ...] = (
     AliasSpec("v32_release_api.observability", "/api/current/observability", ("GET",), "profile_models_reports"),
     AliasSpec("v32_release_api.reports_generate", "/api/current/reports/generate", ("POST",), "profile_models_reports"),
     # v4.5 delivery operations
-    AliasSpec("v45_api.capabilities", "/api/current/deliveries/capabilities", ("GET",), "deliveries"),
     AliasSpec("v45_api.enqueue_delivery", "/api/current/deliveries", ("POST",), "deliveries"),
     AliasSpec("v45_api.list_deliveries", "/api/current/deliveries", ("GET",), "deliveries"),
     AliasSpec("v45_api.get_delivery_health", "/api/current/deliveries/health", ("GET",), "deliveries"),
