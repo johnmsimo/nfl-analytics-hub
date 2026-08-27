@@ -14,8 +14,10 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app . .
-RUN mkdir -p /app/seed-data \
+RUN test -s /app/data/player_week_2025.csv \
+    && mkdir -p /app/seed-data \
     && cp -a /app/data/. /app/seed-data/ \
+    && test -s /app/seed-data/player_week_2025.csv \
     && rm -rf /app/data \
     && mkdir -p /app/data \
     && chown -R app:app /app
