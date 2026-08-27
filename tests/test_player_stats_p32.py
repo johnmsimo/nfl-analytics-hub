@@ -98,6 +98,40 @@ def test_seeded_warehouse_exposes_normalized_player_game_logs(app_fixture):
             assert field in row
 
 
+def test_current_stat_refresh_refreshes_schedule_first(tmp_path, monkeypatch):
+    events: list[str] = []
+    path = tmp_path / "player_week_2026.csv"
+    path.write_text("header\n", encoding="utf-8")
+
+    def fake_schedule(season, refresh=False):
+        assert season == 2026
+        assert refresh is True
+        events.append("schedule")
+        return [{"completed": True}, {"completed": False}]
+
+    def fake_stats(season, refresh=False):
+        assert season == 2026
+        assert refresh is True
+        assert events == ["schedule"]
+        events.append("stats")
+        return [{"player_id": "1"}]
+
+    monkeypatch.setattr(player_stats_warehouse.nfl_data, "get_schedule", fake_schedule)
+    monkeypatch.setattr(player_stats_warehouse.nfl_data, "get_player_week_stats", fake_stats)
+    monkeypatch.setattr(player_stats_warehouse, "_runtime_player_week_path", lambda season: path)
+    monkeypatch.setattr(
+        player_stats_warehouse,
+        "_import_with_provenance_cache",
+        lambda incoming, source: {"read": 1, "written": 1, "skipped": 0},
+    )
+
+    result = player_stats_warehouse.refresh_current_stats(2026, object())
+    assert events == ["schedule", "stats"]
+    assert result["completed_games_discovered"] == 1
+    assert result["cache_rows"] == 1
+    assert result["written"] == 1
+
+
 def test_readiness_gate_requires_current_and_projection_evidence(monkeypatch):
     baseline = {
         "season": 2025,
