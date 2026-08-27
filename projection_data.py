@@ -1,6 +1,6 @@
 """Warehouse-backed player evidence for projections and prop intelligence.
 
-P3.2 moves the decision surfaces off request-time CSV/boxscore discovery.  The
+P3.2 moves the decision surfaces off request-time CSV/boxscore discovery. The
 normalized warehouse becomes the canonical source for player histories while
 ``nfl_data`` remains responsible for schedule/live-score collection.
 
@@ -84,7 +84,7 @@ def stats_season(target_season: int) -> int:
     """Choose a statistically defensible season for player projections.
 
     Preseason data is stored and queryable, but it cannot replace a full prior
-    regular-season baseline.  The current season becomes primary only after the
+    regular-season baseline. The current season becomes primary only after the
     configured number of regular-season weeks has landed in the warehouse.
     """
     minimum_weeks = max(int(os.environ.get("P32_CURRENT_REG_WEEKS", "3")), 1)
@@ -130,8 +130,6 @@ def player_game_logs(season: int) -> dict[str, list[dict[str, Any]]]:
         for field in STAT_FIELDS:
             value = getattr(stat, field, 0) or 0
             row[field] = float(value)
-        # Existing projection code expects the two counting stats as numbers;
-        # keeping them numeric rather than strings preserves that contract.
         row["completions"] = int(row["completions"])
         row["attempts"] = int(row["attempts"])
         logs[key].append(row)
@@ -142,8 +140,8 @@ def player_index(target_season: int, evidence_season: int | None = None) -> dict
     """Current roster metadata joined to the chosen statistical history.
 
     If a player changed teams, the most recently touched current-season
-    membership wins.  P3.1 imports weekly rosters chronologically, so this is
-    the latest observed team while retaining every historical membership for
+    membership wins. P3.1 imports weekly rosters chronologically, so this is the
+    latest observed team while retaining every historical membership for
     auditability.
     """
     evidence_season = evidence_season or stats_season(target_season)
@@ -172,12 +170,12 @@ def player_index(target_season: int, evidence_season: int | None = None) -> dict
             "rosterVerified": True,
         }
 
-    # Historical endpoints can still inspect a season even when no explicit
-    # roster snapshot was loaded for it.  Current-season decision surfaces,
-    # however, intentionally use only roster-verified players.
-    if current or target_season != evidence_season:
+    if current:
         return current
 
+    # Test/degraded environments may not yet have the target-season roster.
+    # Preserve read availability from the evidence season, but mark every row
+    # unverified so production readiness cannot mistake the fallback for P3.1.
     for key, history in logs.items():
         if not history:
             continue
@@ -252,9 +250,12 @@ def projection_pool_snapshot(target_season: int) -> dict[str, Any]:
     evidence = stats_season(target_season)
     logs = player_game_logs(evidence)
     index = player_index(target_season, evidence)
+    roster_verified = {
+        key: meta for key, meta in index.items() if bool(meta.get("rosterVerified"))
+    }
     skill = {
         key: meta
-        for key, meta in index.items()
+        for key, meta in roster_verified.items()
         if str(meta.get("position") or "").upper() in SKILL_POSITIONS
     }
     ready = {
@@ -267,6 +268,7 @@ def projection_pool_snapshot(target_season: int) -> dict[str, Any]:
         "evidence_rows": sum(len(rows) for rows in logs.values()),
         "evidence_players": len(logs),
         "current_roster_players": len(index),
+        "roster_verified_players": len(roster_verified),
         "current_skill_players": len(skill),
         "projection_ready_skill_players": len(ready),
         "projection_ready_skill_coverage": coverage,
