@@ -7,9 +7,9 @@ normalized warehouse becomes the canonical source for player histories while
 The target-season roster is deliberately separated from the statistics season:
 before enough current regular-season evidence exists, returning players use the
 prior season's game history but are assigned to their *current* roster/team.
-That prevents preseason rows or one-game samples from silently replacing a
-full historical baseline and avoids projecting traded players for their old
-club.
+Preseason facts are retained in the warehouse for role/coverage analysis but
+are excluded from projection distributions so exhibition usage cannot distort
+regular-season yardage and touchdown expectations.
 """
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ def stats_season(target_season: int) -> int:
 
 
 def player_game_logs(season: int) -> dict[str, list[dict[str, Any]]]:
-    """Return canonical player game histories in the legacy projection schema."""
+    """Return REG/POST canonical histories in the legacy projection schema."""
     cache_key = ("logs", season)
     cached = _cache_get(cache_key)
     if cached is not _CACHE_MISS:
@@ -146,7 +146,7 @@ def player_game_logs(season: int) -> dict[str, list[dict[str, Any]]]:
         select(PlayerGameStat, Game, Player)
         .join(Game, Game.id == PlayerGameStat.game_id)
         .join(Player, Player.id == PlayerGameStat.player_id)
-        .where(Game.season == season)
+        .where(Game.season == season, Game.season_type.in_(("REG", "POST")))
         .order_by(Game.kickoff_at, Game.week, Game.id, PlayerGameStat.id)
     )
     logs: dict[str, list[dict[str, Any]]] = defaultdict(list)
