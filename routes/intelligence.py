@@ -5,6 +5,7 @@ from collections import defaultdict
 from flask import Blueprint, jsonify, request
 
 import nfl_data
+import projection_data as pd
 import projections as pj
 from routes.dashboard_api import _team_power
 
@@ -21,7 +22,7 @@ def _season() -> tuple[int, int]:
         except Exception:
             season = int(nfl_data.default_season())
     try:
-        stats = nfl_data.stats_season(season)
+        stats = pd.stats_season(season)
     except Exception:
         stats = season - 1
     return season, stats
@@ -45,9 +46,9 @@ def _next_opponent(team: str, season: int) -> str | None:
 def api_analytics():
     season, ss = _season()
     summaries = nfl_data.team_summaries(ss)
-    logs = nfl_data.player_game_logs(ss)
-    idx = nfl_data.player_index(ss)
-    dvp = nfl_data.defense_vs_position(ss)
+    logs = pd.player_game_logs(ss)
+    idx = pd.player_index(season, ss)
+    dvp = pd.defense_vs_position(ss)
 
     teams = []
     for code, row in summaries.items():
@@ -86,6 +87,8 @@ def api_analytics():
                 "marketLabel": pj.MARKET_LABELS[market], "projection": round(proj["mean"], 1),
                 "line": line, "probOver": round(prob, 4), "opponent": opponent,
                 "signal": round(abs(prob - .5), 4),
+                "evidenceSeason": ss,
+                "rosterVerified": bool(meta.get("rosterVerified")),
             })
     market_rows.sort(key=lambda x: x["signal"], reverse=True)
 
@@ -102,7 +105,7 @@ def api_analytics():
         "team_efficiency": teams,
         "top_signals": market_rows[:20],
         "position_pool": [{"position": k, "players": v} for k, v in sorted(position_counts.items())],
-        "methodology": "Descriptive team efficiency plus transparent distribution-based player projections. Signals measure distance from a 50% over probability at a reference line; they are not betting recommendations.",
+        "methodology": "Descriptive team efficiency plus transparent distribution-based player projections backed by normalized warehouse game facts and the current-season roster. Signals measure distance from a 50% over probability at a reference line; they are not betting recommendations.",
     })
 
 
@@ -110,8 +113,8 @@ def api_analytics():
 def api_rankings():
     season, ss = _season()
     summaries = nfl_data.team_summaries(ss)
-    logs = nfl_data.player_game_logs(ss)
-    idx = nfl_data.player_index(ss)
+    logs = pd.player_game_logs(ss)
+    idx = pd.player_index(season, ss)
 
     team_rows = [{
         **row,
@@ -151,6 +154,8 @@ def api_rankings():
             "playerId": pid, "player": meta["name"], "team": meta["team"],
             "games": n, "primary": round(primary, 1), "usage": round(secondary, 1),
             "score": round(score, 1), "metric": metric,
+            "evidenceSeason": ss,
+            "rosterVerified": bool(meta.get("rosterVerified")),
         })
     for pos, rows in leaders.items():
         rows.sort(key=lambda x: x["score"], reverse=True)
