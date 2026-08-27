@@ -15,6 +15,7 @@ from flask import Blueprint, jsonify, request
 
 import nfl_data
 import odds_api
+import projection_data as pd
 import projections as pj
 import value_engine as ve
 
@@ -57,10 +58,10 @@ def _best_price(rows: list[dict], side: str):
 
 def _build_game_rows(game: dict, season: int) -> list[dict]:
     """All prop rows for one game: model projections joined to book prices."""
-    ss = nfl_data.stats_season(season)
-    logs = nfl_data.player_game_logs(ss)
-    idx = nfl_data.player_index(ss)
-    dvp = nfl_data.defense_vs_position(ss)
+    ss = pd.stats_season(season)
+    logs = pd.player_game_logs(ss)
+    idx = pd.player_index(season, ss)
+    dvp = pd.defense_vs_position(ss)
 
     # book prop rows grouped by (normalized player, market, line)
     odds_rows: dict[tuple, list[dict]] = {}
@@ -130,6 +131,8 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
                 "grade": ve.edge_grade(edge),
                 "bookCount": len({b["book"] for b in brs}),
                 "noOdds": no_odds, "modelSource": "analytic",
+                "evidenceSeason": ss,
+                "rosterVerified": bool(meta.get("rosterVerified")),
             })
     rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or 0)))
     return rows
@@ -147,7 +150,7 @@ def api_props_game(game_id):
                  if g["game_id"] == game_id), None)
     if not game:
         return jsonify({"error": "game not found"}), 404
-    out = {"game": game, "stats_season": nfl_data.stats_season(season),
+    out = {"game": game, "stats_season": pd.stats_season(season),
            "rows": _build_game_rows(game, season)}
     _cache_set(key, out)
     return jsonify(out)
@@ -170,6 +173,7 @@ def api_props_board():
     rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or 0), -r["probOver"]))
     out = {"season": season, "week": week, "season_type": stype,
            "games": len(games), "rows": rows,
+           "stats_season": pd.stats_season(season),
            "odds_configured": odds_api.is_configured()}
     _cache_set(key, out)
     return jsonify(out)
