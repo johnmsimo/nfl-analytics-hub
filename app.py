@@ -281,6 +281,7 @@ from routes.admin_api import admin_bp  # noqa: E402
 from routes.analytics_api import analytics_api_bp  # noqa: E402
 from routes.ask import ask_bp  # noqa: E402
 from routes.auth import auth_bp  # noqa: E402
+from routes.current_api import register_current_api  # noqa: E402
 from routes.dashboard_api import dashboard_bp  # noqa: E402
 from routes.database_api import database_bp  # noqa: E402
 from routes.directories import directories_bp  # noqa: E402
@@ -312,6 +313,7 @@ app.register_blueprint(analytics_api_bp)
 app.register_blueprint(v32_bp)
 app.register_blueprint(v32_release_bp)
 app.register_blueprint(v45_bp)
+register_current_api(app)
 
 _preload_started = False
 
