@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, jsonify, session
 
+from csp_policy import strict_csp_header
 from security import (
     authenticate_user,
     current_role,
@@ -15,6 +16,13 @@ from security import (
 )
 
 auth_bp = Blueprint("auth", __name__)
+
+
+@auth_bp.after_app_request
+def apply_strict_script_csp(response):
+    """Override the legacy permissive script directive for every app response."""
+    response.headers["Content-Security-Policy"] = strict_csp_header()
+    return response
 
 
 def _safe_next(value: str | None) -> str:
