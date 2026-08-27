@@ -1,0 +1,129 @@
+name: P2 Exit Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only:
+        description: Confirm this run may perform the read-only P2 production exit verification
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_P2_EXIT_VERIFICATION
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2-exit-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: inputs.confirm_read_only == 'RUN_P2_EXIT_VERIFICATION'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate read-only controls
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirm_read_only }}" = "RUN_P2_EXIT_VERIFICATION"
+
+      - name: Verify P2.5 quality policy on main
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          policy = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          assert float(policy["tool"]["coverage"]["report"]["fail_under"]) >= 68
+
+          quality = Path(".github/workflows/quality.yml").read_text(encoding="utf-8")
+          assert "--cov-fail-under=90" in quality
+          assert "ruff check . --select E9,F63,F7,F82" in quality
+          assert "api_lifecycle.py" in quality
+          assert "routes/current_api.py" in quality
+          print('{"ok":true,"repository_coverage_floor":68,"analytics_coverage_floor":90}')
+          PY
+
+      - name: Verify public production readiness
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 --retry-all-errors \
+            https://nfl-analytics-hub.fly.dev/ready > /tmp/p2-ready.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/p2-ready.json").read_text(encoding="utf-8"))
+          schedule = data.get("schedule") or {}
+          counts = schedule.get("counts") or {}
+          current = schedule.get("current_week") or {}
+          assert data.get("ok") is True, data
+          assert data.get("database") == "ready", data
+          assert schedule.get("ready") is True, schedule
+          assert int(schedule.get("total_games") or 0) >= 334, schedule
+          assert int(counts.get("PRE") or 0) >= 49, counts
+          assert int(counts.get("REG") or 0) >= 272, counts
+          assert int(counts.get("POST") or 0) >= 13, counts
+          assert current.get("season") == 2026, current
+          assert current.get("season_type") in {"PRE", "REG", "POST"}, current
+          assert isinstance(current.get("week"), int), current
+          print(json.dumps({
+              "ok": True,
+              "database": data.get("database"),
+              "status": data.get("status"),
+              "total_games": schedule.get("total_games"),
+              "counts": counts,
+              "current_week": current,
+          }, sort_keys=True))
+          PY
+
+      - name: Verify production CSP and auth boundary
+        run: |
+          curl --fail --silent --show-error -D /tmp/p2-login-headers.txt -o /tmp/p2-login.html \
+            https://nfl-analytics-hub.fly.dev/login
+          status=$(curl --silent --show-error -o /tmp/p2-current.json -w '%{http_code}' \
+            https://nfl-analytics-hub.fly.dev/api/current/capabilities)
+          test "$status" = "401"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          headers = Path("/tmp/p2-login-headers.txt").read_text(encoding="utf-8")
+          csp_lines = [line for line in headers.splitlines() if line.lower().startswith("content-security-policy:")]
+          assert csp_lines, headers
+          csp = csp_lines[-1].split(":", 1)[1].strip()
+          directives = {}
+          for raw in csp.split(";"):
+              raw = raw.strip()
+              if not raw:
+                  continue
+              name, _, value = raw.partition(" ")
+              directives[name] = value.strip()
+          script_src = directives.get("script-src", "")
+          assert "'unsafe-inline'" not in script_src, script_src
+          assert "'unsafe-eval'" not in script_src, script_src
+          assert directives.get("object-src") == "'none'", directives
+          assert directives.get("base-uri") == "'self'", directives
+          assert directives.get("form-action") == "'self'", directives
+
+          payload = json.loads(Path("/tmp/p2-current.json").read_text(encoding="utf-8"))
+          assert payload.get("code") == "AUTH_REQUIRED", payload
+          print('{"ok":true,"strict_script_csp":true,"canonical_api_auth_boundary":true}')
+          PY
+
+      - name: Run sanitized P2 exit verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"
