@@ -21,30 +21,33 @@ def test_height_normalization_accepts_roster_formats():
 
 def test_hydrate_player_fills_projection_ready_bio(app_fixture):
     with app_fixture.app_context():
-        player = Player(external_id="00-test", full_name="Test Player")
-        db.session.add(player)
-        db.session.flush()
-        player_warehouse._hydrate_player(
-            player,
-            {
-                "full_name": "Test Player Jr.",
-                "first_name": "Test",
-                "last_name": "Player",
-                "position": "wr",
-                "birth_date": "2000-01-02",
-                "height": "6-2",
-                "weight": "205",
-                "college_name": "Example State",
-            },
-        )
-        assert player.full_name == "Test Player Jr."
-        assert player.first_name == "Test"
-        assert player.last_name == "Player"
-        assert player.position == "WR"
-        assert player.height_inches == 74
-        assert player.weight_lbs == 205
-        assert player.college == "Example State"
-        assert player.birth_date.isoformat() == "2000-01-02"
+        try:
+            player = Player(external_id="p31-bio-test", full_name="Test Player")
+            db.session.add(player)
+            db.session.flush()
+            player_warehouse._hydrate_player(
+                player,
+                {
+                    "full_name": "Test Player Jr.",
+                    "first_name": "Test",
+                    "last_name": "Player",
+                    "position": "wr",
+                    "birth_date": "2000-01-02",
+                    "height": "6-2",
+                    "weight": "205",
+                    "college_name": "Example State",
+                },
+            )
+            assert player.full_name == "Test Player Jr."
+            assert player.first_name == "Test"
+            assert player.last_name == "Player"
+            assert player.position == "WR"
+            assert player.height_inches == 74
+            assert player.weight_lbs == 205
+            assert player.college == "Example State"
+            assert player.birth_date.isoformat() == "2000-01-02"
+        finally:
+            db.session.rollback()
 
 
 def test_player_warehouse_snapshot_enforces_coverage(app_fixture, monkeypatch):
@@ -53,39 +56,66 @@ def test_player_warehouse_snapshot_enforces_coverage(app_fixture, monkeypatch):
     monkeypatch.setenv("P31_MIN_IDENTITY_COVERAGE", "1.0")
     monkeypatch.setenv("P31_MIN_NFLVERSE_COVERAGE", "1.0")
     monkeypatch.setenv("P31_MIN_POSITION_COVERAGE", "1.0")
+    season = 2099
 
     with app_fixture.app_context():
-        db.session.add(Season(year=2026))
-        teams = [Team(abbreviation="NE", name="New England"), Team(abbreviation="SEA", name="Seattle")]
-        db.session.add_all(teams)
-        db.session.flush()
-        players = [
-            Player(external_id="00-a", full_name="Alpha Player", position="QB"),
-            Player(external_id="00-b", full_name="Beta Player", position="WR"),
-        ]
-        db.session.add_all(players)
-        db.session.flush()
-        db.session.add_all(
-            [
-                PlayerExternalIdentity(player_id=players[0].id, source_key="nflverse", external_id="00-a"),
-                PlayerExternalIdentity(player_id=players[1].id, source_key="nflverse", external_id="00-b"),
-                PlayerTeamSeason(player_id=players[0].id, team_id=teams[0].id, season=2026),
-                PlayerTeamSeason(player_id=players[1].id, team_id=teams[1].id, season=2026),
+        try:
+            db.session.add(Season(year=season))
+            teams = [
+                Team(abbreviation="P31A", name="P3.1 Alpha"),
+                Team(abbreviation="P31B", name="P3.1 Beta"),
             ]
-        )
-        db.session.commit()
+            db.session.add_all(teams)
+            db.session.flush()
+            players = [
+                Player(external_id="p31-00-a", full_name="Alpha Player", position="QB"),
+                Player(external_id="p31-00-b", full_name="Beta Player", position="WR"),
+            ]
+            db.session.add_all(players)
+            db.session.flush()
+            db.session.add_all(
+                [
+                    PlayerExternalIdentity(
+                        player_id=players[0].id,
+                        source_key="nflverse",
+                        external_id="p31-00-a",
+                    ),
+                    PlayerExternalIdentity(
+                        player_id=players[1].id,
+                        source_key="nflverse",
+                        external_id="p31-00-b",
+                    ),
+                    PlayerTeamSeason(
+                        player_id=players[0].id,
+                        team_id=teams[0].id,
+                        season=season,
+                    ),
+                    PlayerTeamSeason(
+                        player_id=players[1].id,
+                        team_id=teams[1].id,
+                        season=season,
+                    ),
+                ]
+            )
+            db.session.flush()
 
-        snapshot = player_warehouse.player_warehouse_snapshot(2026)
-        assert snapshot["ok"] is True
-        assert snapshot["rostered_players"] == 2
-        assert snapshot["teams_covered"] == 2
-        assert snapshot["identity_coverage"] == 1.0
-        assert snapshot["nflverse_identity_coverage"] == 1.0
-        assert snapshot["position_coverage"] == 1.0
+            snapshot = player_warehouse.player_warehouse_snapshot(season)
+            assert snapshot["ok"] is True
+            assert snapshot["rostered_players"] == 2
+            assert snapshot["teams_covered"] == 2
+            assert snapshot["identity_coverage"] == 1.0
+            assert snapshot["nflverse_identity_coverage"] == 1.0
+            assert snapshot["position_coverage"] == 1.0
+        finally:
+            db.session.rollback()
 
 
 def test_population_wrapper_uses_rosters_only(monkeypatch):
-    monkeypatch.setattr(player_warehouse, "sync_rosters", lambda season: {"read": 1500, "written": 1500})
+    monkeypatch.setattr(
+        player_warehouse,
+        "sync_rosters",
+        lambda season: {"read": 1500, "written": 1500},
+    )
     monkeypatch.setattr(
         player_warehouse,
         "normalize_roster_records",
