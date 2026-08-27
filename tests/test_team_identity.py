@@ -1,5 +1,6 @@
 """Warehouse team identity must be single-valued across both importers."""
 
+import data_ingestion
 from coverage_service import EXPECTED_TEAMS
 from database import db
 from db_models import Team
@@ -58,6 +59,51 @@ def test_seed_never_creates_espn_or_placeholder_rows(app_fixture):
         stored = {t.abbreviation for t in db.session.scalars(db.select(Team)).all()}
     leaked = stored & {"JAX", "WSH", "AFC", "NFC", "TBD", "TBA", "NFL", "LA", "STL", "SD", "OAK"}
     assert not leaked, f"non-canonical team rows ingested: {leaked}"
+
+
+def test_cache_upsert_adopts_pre_normalization_team_row(app_fixture, monkeypatch):
+    """A legacy row owning the provider id must be renamed, not duplicated.
+
+    This mirrors production databases created before team normalization: the
+    legacy abbreviation already owns ESPN's unique external id, so attempting
+    to insert a second canonical Team row would raise an integrity error.
+    """
+    with app_fixture.app_context():
+        legacy = Team(
+            abbreviation="OLDX",
+            name="Legacy Team",
+            external_id="legacy-provider-id-9001",
+        )
+        db.session.add(legacy)
+        db.session.commit()
+        legacy_id = legacy.id
+
+        original_normalize = data_ingestion.normalize_team
+
+        def normalize_for_upgrade(value):
+            if str(value or "").strip().upper() in {"OLDX", "NEWX"}:
+                return "NEWX"
+            return original_normalize(value)
+
+        monkeypatch.setattr(data_ingestion, "normalize_team", normalize_for_upgrade)
+        upgraded = data_ingestion._upsert_team(
+            "OLDX",
+            "Canonical Team",
+            "legacy-provider-id-9001",
+        )
+        db.session.flush()
+
+        assert upgraded.id == legacy_id
+        assert upgraded.abbreviation == "NEWX"
+        assert upgraded.name == "Canonical Team"
+        assert db.session.scalar(
+            db.select(db.func.count()).select_from(Team).where(
+                Team.external_id == "legacy-provider-id-9001"
+            )
+        ) == 1
+
+        db.session.delete(upgraded)
+        db.session.commit()
 
 
 def test_warehouse_routes_accept_espn_codes(client):

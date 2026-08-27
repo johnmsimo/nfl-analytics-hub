@@ -49,19 +49,49 @@ def _num(value, integer=False):
 
 
 def _upsert_team(abbr, name=None, external_id=None):
-    abbr = normalize_team(abbr)
-    if not abbr:
+    """Upsert a canonical team while safely adopting pre-normalization rows.
+
+    Production may still contain ESPN-era rows such as ``JAX``/``WSH`` from
+    before team normalization was introduced. Those rows already own ESPN's
+    unique ``external_id``. Looking up only the new canonical abbreviation and
+    then inserting ``JAC``/``WAS`` would therefore raise an integrity error.
+
+    When the canonical abbreviation is missing, reuse the row that already owns
+    the provider id if its legacy abbreviation normalizes to the same franchise.
+    Renaming that row in place preserves every foreign-key relationship.
+    """
+    canonical = normalize_team(abbr)
+    if not canonical:
         return None
-    team = db.session.scalar(select(Team).where(Team.abbreviation == abbr))
+
+    external_key = None
+    if external_id not in (None, ""):
+        external_key = str(external_id).strip() or None
+
+    team = db.session.scalar(select(Team).where(Team.abbreviation == canonical))
+    external_owner = None
+    if external_key:
+        external_owner = db.session.scalar(select(Team).where(Team.external_id == external_key))
+
+    if not team and external_owner:
+        if normalize_team(external_owner.abbreviation) == canonical:
+            external_owner.abbreviation = canonical
+            team = external_owner
+            db.session.flush()
+
     if not team:
-        team = Team(abbreviation=abbr, name=name or abbr, external_id=external_id)
+        team = Team(abbreviation=canonical, name=name or canonical, external_id=external_key)
         db.session.add(team)
         db.session.flush()
     else:
         if name:
             team.name = name
-        if external_id:
-            team.external_id = external_id
+        # Never steal a unique provider id from another row. A legacy alias
+        # matching this franchise is adopted above when the canonical row does
+        # not already exist; split rows can then be reconciled explicitly
+        # without making routine cached-data sync fail.
+        if external_key and (external_owner is None or external_owner.id == team.id):
+            team.external_id = external_key
     return team
 
 
@@ -266,8 +296,7 @@ def import_coaches(path: str | Path) -> dict:
                 CoachingAssignment.coach_id == coach.id, CoachingAssignment.team_id == team.id,
                 CoachingAssignment.season == season_year, CoachingAssignment.role == role))
             if not assignment:
-                assignment = CoachingAssignment(coach_id=coach.id, team_id=team.id,
-                    season=season_year, role=role)
+                assignment = CoachingAssignment(coach_id=coach.id, team_id=team.id, season=season_year, role=role)
                 db.session.add(assignment)
             assignment.start_date = _date(row.get("start_date"))
             assignment.end_date = _date(row.get("end_date"))
