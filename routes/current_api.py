@@ -264,6 +264,4 @@ def register_current_api(app: Flask) -> None:
             methods=list(spec.methods),
         )
     if missing:
-        raise RuntimeError(
-            "cannot register canonical API aliases; missing endpoints: " + ", ".join(missing)
-        )
+        raise RuntimeError("cannot register canonical API aliases; missing endpoints: " + ", ".join(missing))
