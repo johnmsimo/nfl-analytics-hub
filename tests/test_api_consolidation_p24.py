@@ -70,6 +70,16 @@ def test_domain_capabilities_are_canonical_not_legacy_payloads(client):
     assert all("/api/current/" in endpoint for endpoint in payload["endpoints"])
 
 
+def test_delivery_capabilities_cannot_be_captured_as_delivery_id(client):
+    response = client.get("/api/current/deliveries/capabilities")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["contract"] == "2026.1"
+    assert payload["domain"] == "deliveries"
+    assert payload["canonical_base"] == "/api/current/deliveries"
+    assert "error" not in payload
+
+
 def test_v2_legacy_route_and_current_alias_share_behavior(client):
     legacy = client.get("/api/v2/live?season=2025&week=1")
     current = client.get("/api/current/intelligence/live?season=2025&week=1")
