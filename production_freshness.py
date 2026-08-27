@@ -142,7 +142,14 @@ def provider_freshness(now: datetime) -> dict:
 
 
 def scheduler_freshness(now: datetime) -> dict:
-    """Compare enabled job records with their configured execution cadence."""
+    """Compare enabled job records with their configured execution cadence.
+
+    A worker restart registers a new ``next_run_at`` before its first interval
+    execution. Historical job evidence can therefore be stale (or from a
+    repaired pre-deploy failure) while the newly started scheduler is healthy
+    and waiting for its first run. In that narrow case the job is ``pending``.
+    Recent failures still remain ``degraded`` until a successful run occurs.
+    """
     expected = _env_true("SCHEDULER_EXPECTED") or _env_true("ENABLE_SCHEDULER")
     if not expected:
         return {
@@ -175,15 +182,21 @@ def scheduler_freshness(now: datetime) -> dict:
         finished_at = row.last_finished_at if row else None
         next_run_at = row.next_run_at if row else None
         finished_age = _age_seconds(now, finished_at)
+        parsed_next_run = _utc(next_run_at)
+        next_run_pending = parsed_next_run is not None and now <= parsed_next_run
+        history_expired = finished_age is None or finished_age > maximum_age
+
         if row is None:
             status = "unavailable"
+        elif row.last_status == "failed" and not (next_run_pending and history_expired):
+            status = "degraded"
+        elif finished_age is not None and finished_age <= maximum_age:
+            status = "ready"
+        elif next_run_pending:
+            status = "pending"
         elif row.last_status == "failed":
             status = "degraded"
-        elif finished_age is not None:
-            status = "stale" if finished_age > maximum_age else "ready"
-        elif next_run_at and now <= (_utc(next_run_at) or now):
-            status = "pending"
-        elif next_run_at:
+        elif finished_age is not None or next_run_at:
             status = "stale"
         else:
             status = "unavailable"
