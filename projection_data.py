@@ -14,6 +14,8 @@ club.
 from __future__ import annotations
 
 import os
+import threading
+import time
 from collections import defaultdict
 from typing import Any
 
@@ -50,6 +52,37 @@ _DVP_FIELDS = (
     "rushing_tds",
     "receiving_tds",
 )
+_CACHE: dict[tuple[Any, ...], tuple[float, Any]] = {}
+_CACHE_LOCK = threading.RLock()
+_CACHE_MISS = object()
+
+
+def _cache_ttl() -> float:
+    return max(float(os.environ.get("PROJECTION_DATA_CACHE_SECONDS", "300")), 0.0)
+
+
+def _cache_get(key: tuple[Any, ...]):
+    with _CACHE_LOCK:
+        hit = _CACHE.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        _CACHE.pop(key, None)
+    return _CACHE_MISS
+
+
+def _cache_set(key: tuple[Any, ...], value: Any) -> Any:
+    ttl = _cache_ttl()
+    if ttl <= 0:
+        return value
+    with _CACHE_LOCK:
+        _CACHE[key] = (time.monotonic() + ttl, value)
+    return value
+
+
+def clear_projection_cache() -> None:
+    """Invalidate short-lived normalized evidence after an explicit sync."""
+    with _CACHE_LOCK:
+        _CACHE.clear()
 
 
 def player_key(player: Player) -> str:
@@ -100,6 +133,11 @@ def stats_season(target_season: int) -> int:
 
 def player_game_logs(season: int) -> dict[str, list[dict[str, Any]]]:
     """Return canonical player game histories in the legacy projection schema."""
+    cache_key = ("logs", season)
+    cached = _cache_get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+
     teams = {
         int(team_id): abbreviation
         for team_id, abbreviation in db.session.execute(select(Team.id, Team.abbreviation)).all()
@@ -133,7 +171,7 @@ def player_game_logs(season: int) -> dict[str, list[dict[str, Any]]]:
         row["completions"] = int(row["completions"])
         row["attempts"] = int(row["attempts"])
         logs[key].append(row)
-    return dict(logs)
+    return _cache_set(cache_key, dict(logs))
 
 
 def player_index(target_season: int, evidence_season: int | None = None) -> dict[str, dict[str, Any]]:
@@ -145,6 +183,11 @@ def player_index(target_season: int, evidence_season: int | None = None) -> dict
     auditability.
     """
     evidence_season = evidence_season or stats_season(target_season)
+    cache_key = ("index", target_season, evidence_season)
+    cached = _cache_get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+
     logs = player_game_logs(evidence_season)
     current: dict[str, dict[str, Any]] = {}
     query = (
@@ -171,7 +214,7 @@ def player_index(target_season: int, evidence_season: int | None = None) -> dict
         }
 
     if current:
-        return current
+        return _cache_set(cache_key, current)
 
     # Test/degraded environments may not yet have the target-season roster.
     # Preserve read availability from the evidence season, but mark every row
@@ -192,7 +235,7 @@ def player_index(target_season: int, evidence_season: int | None = None) -> dict
             "rosterSeason": target_season,
             "rosterVerified": False,
         }
-    return current
+    return _cache_set(cache_key, current)
 
 
 def _position_group(position: str) -> str | None:
@@ -206,6 +249,11 @@ def _position_group(position: str) -> str | None:
 
 def defense_vs_position(season: int) -> dict[str, dict[str, Any]]:
     """Defense-vs-position aggregates derived from normalized player facts."""
+    cache_key = ("dvp", season)
+    cached = _cache_get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+
     acc: dict[str, dict[str, dict[str, float]]] = {}
     games_per_team: dict[str, set[str]] = {}
     for history in player_game_logs(season).values():
@@ -242,7 +290,7 @@ def defense_vs_position(season: int) -> dict[str, dict[str, Any]]:
                 mean = sum(values) / len(values) if values else 0.0
                 ratios[f"{field}_ratio"] = round(value / mean, 3) if mean else 1.0
             per_game.update(ratios)
-    return out
+    return _cache_set(cache_key, out)
 
 
 def projection_pool_snapshot(target_season: int) -> dict[str, Any]:
