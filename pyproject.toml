@@ -15,6 +15,11 @@ addopts = "-ra --strict-markers"
 branch = true
 omit = ["tests/*", "migrations/*", ".venv/*"]
 
+[tool.coverage.report]
+fail_under = 68
+precision = 2
+show_missing = true
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
