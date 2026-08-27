@@ -23,7 +23,7 @@ from data_ingestion import import_player_week, import_schedule
 from database import db
 from db_models import DataSyncRun, Game, PlayerGameStat, PlayerSeasonStat
 from projection_data import projection_pool_snapshot
-from source_registry import register_source
+from source_registry import clear_raw_cache, prime_raw_cache, register_source
 
 
 def _seed_dir() -> Path:
@@ -59,11 +59,20 @@ def _import_seed_schedule(season: int, source) -> dict[str, Any]:
     return import_schedule(path, source=source)
 
 
+def _import_with_provenance_cache(path: Path, source) -> dict[str, Any]:
+    """Import a stat CSV without one provenance existence query per row."""
+    prime_raw_cache(source, "player_game_stat")
+    try:
+        return import_player_week(path, source=source)
+    finally:
+        clear_raw_cache()
+
+
 def _import_baseline_stats(season: int, source) -> dict[str, Any]:
     path = _seed_dir() / f"player_week_{season}.csv"
     if not path.exists():
         raise RuntimeError(f"missing bundled player-stat baseline: {path.name}")
-    return import_player_week(path, source=source)
+    return _import_with_provenance_cache(path, source)
 
 
 def refresh_current_stats(season: int, source) -> dict[str, Any]:
@@ -72,7 +81,7 @@ def refresh_current_stats(season: int, source) -> dict[str, Any]:
     path = _runtime_player_week_path(season)
     if rows and not path.exists():
         raise RuntimeError("current player rows were built but the runtime cache file is missing")
-    imported = import_player_week(path, source=source) if path.exists() else {
+    imported = _import_with_provenance_cache(path, source) if path.exists() else {
         "read": 0,
         "written": 0,
         "skipped": 0,
@@ -187,7 +196,11 @@ def populate_player_stats(target_season: int = 2026, baseline_season: int = 2025
     db.session.add(run)
     db.session.commit()
 
-    seed_source = _source("p32-historical-baseline", "P3.2 bundled historical player baseline", source_type="file")
+    seed_source = _source(
+        "p32-historical-baseline",
+        "P3.2 bundled historical player baseline",
+        source_type="file",
+    )
     espn_source = _source(
         "espn-player-stats",
         "ESPN public completed-game player boxscores",
