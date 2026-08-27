@@ -76,7 +76,15 @@ def _import_baseline_stats(season: int, source) -> dict[str, Any]:
 
 
 def refresh_current_stats(season: int, source) -> dict[str, Any]:
-    """Refresh completed current-season games through the existing ESPN cache."""
+    """Refresh schedule + completed current-season ESPN player boxscores.
+
+    Fly SSH may select a process without the web volume. Refreshing the public
+    schedule inside this process means completed-game discovery never depends
+    on whichever local schedule snapshot happens to exist on that machine.
+    The durable output is the normalized database, not this temporary cache.
+    """
+    games = nfl_data.get_schedule(season, refresh=True)
+    completed_games = sum(1 for game in games if game.get("completed"))
     rows = nfl_data.get_player_week_stats(season, refresh=True)
     path = _runtime_player_week_path(season)
     if rows and not path.exists():
@@ -89,6 +97,7 @@ def refresh_current_stats(season: int, source) -> dict[str, Any]:
     return {
         "cache_rows": len(rows),
         "cache_file": path.name,
+        "completed_games_discovered": completed_games,
         **imported,
     }
 
