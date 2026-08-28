@@ -181,9 +181,17 @@ def test_p45_scheduler_and_product_surface_are_wired():
     fly = (ROOT / "fly.toml").read_text(encoding="utf-8")
     games = (ROOT / "games.html").read_text(encoding="utf-8")
     routes = (ROOT / "routes" / "games.py").read_text(encoding="utf-8")
+    verifier = (ROOT / "scripts" / "p45_smart_market_refresh_verification.py").read_text(
+        encoding="utf-8"
+    )
     assert '"game-market-refresh"' in scheduler
     assert "refresh_next_slate(allow_provider_spend=True)" in scheduler
     assert "ENABLE_GAME_MARKET_REFRESH = 'true'" in fly
     assert "/api/game-opportunities/week" in games
     assert "/api/game-opportunities/week" in routes
     assert "/api/game-market-refresh/status" in routes
+    assert (
+        "scheduler_job_registered = scheduler_row is not None and bool(scheduler_row.enabled)"
+        in verifier
+    )
+    assert '"scheduler_job_registered": scheduler_job_registered' in verifier
