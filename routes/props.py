@@ -1,10 +1,10 @@
 """
-Props routes: per-game player intelligence and the weekly decision board.
+Props routes: per-game player intelligence, weekly board, and P3.5 Quick Props delivery.
 
-P3.4 keeps the P3.3 evidence-calibrated projection as the statistical core,
-then adds deterministic Monte Carlo distribution confirmation and one canonical
-decision contract. Sportsbook edge/EV/Kelly remain separate from model quality;
-unpriced model picks never masquerade as actionable priced bets.
+P3.4 owns the decision contract. P3.5 guarantees that product surfaces consume
+that contract deterministically: Lean-or-better model picks are delivered first,
+Pass rows are never silently promoted, and sportsbook price remains a separate
+actionability layer.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import time
 
 from flask import Blueprint, jsonify, request
 
+import decision_delivery as dd
 import decision_intelligence as di
 import nfl_data
 import odds_api
@@ -58,15 +59,21 @@ def _best_price(rows: list[dict], side: str):
     return {"book": best["book"], "price": best["price"]}
 
 
-def _build_game_rows(game: dict, season: int) -> list[dict]:
-    """All P3.4 player-market decisions for one game."""
+def _build_game_rows(game: dict, season: int, *, include_odds: bool = True) -> list[dict]:
+    """All P3.4 player-market decisions for one game.
+
+    ``include_odds=False`` is used by protected read-only verification so the
+    model/delivery contract can be checked without consuming provider credits.
+    """
     ss = pd.stats_season(season)
     logs = pd.player_game_logs(ss)
     idx = pd.player_index(season, ss)
     dvp = pd.defense_vs_position(ss)
 
     odds_rows: dict[tuple, list[dict]] = {}
-    event = odds_api.find_event_for_game(game) if odds_api.is_configured() else None
+    event = None
+    if include_odds and odds_api.is_configured():
+        event = odds_api.find_event_for_game(game)
     if event:
         for row in odds_api.parse_prop_markets(odds_api.get_event_props(event["id"])):
             market = pj.ODDS_KEY_TO_MARKET.get(row["base_key"])
@@ -213,22 +220,32 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
                     "rosterVerified": bool(meta.get("rosterVerified")),
                 }
             )
-    rows.sort(
-        key=lambda row: (
-            -row["decisionScore"],
-            row["decisionGrade"] == "Pass",
-            row["edge"] is None,
-            -(row["edge"] or 0),
-        )
-    )
-    return rows
+    return dd.sort_decisions(rows)
+
+
+def _build_week_rows(
+    season: int,
+    week: int,
+    season_type: str,
+    *,
+    include_odds: bool = True,
+) -> tuple[list[dict], int, int]:
+    games = nfl_data.get_week_games(season, week, season_type)
+    rows: list[dict] = []
+    errors = 0
+    for game in games:
+        try:
+            rows.extend(_build_game_rows(game, season, include_odds=include_odds))
+        except Exception:  # noqa: BLE001 - delivery reports partial/degraded state explicitly
+            errors += 1
+    return dd.sort_decisions(rows), errors, len(games)
 
 
 @props_bp.route("/api/props/game/<game_id>")
 def api_props_game(game_id):
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
-    key = ("game", game_id, season, "p3.4")
+    key = ("game", game_id, season, "p3.5")
     hit = _cache_get(key)
     if hit and request.args.get("refresh") != "1":
         return jsonify(hit)
@@ -242,7 +259,8 @@ def api_props_game(game_id):
     out = {
         "game": game,
         "stats_season": pd.stats_season(season),
-        "model_version": "p3.4-simulation-decision",
+        "model_version": "p3.5-decision-delivery",
+        "delivery": dd.build_delivery(rows, limit=8, expected_games=1),
         "rows": rows,
     }
     _cache_set(key, out)
@@ -257,35 +275,70 @@ def api_props_board():
     season_type = request.args.get(
         "type", cw["season_type"] if season == cw["season"] else "REG"
     )
-    key = ("board", season, week, season_type, "p3.4")
+    key = ("board", season, week, season_type, "p3.5")
     hit = _cache_get(key)
     if hit and request.args.get("refresh") != "1":
         return jsonify(hit)
-    games = nfl_data.get_week_games(season, week, season_type)
-    rows: list[dict] = []
-    for game in games:
-        rows.extend(_build_game_rows(game, season))
-    rows.sort(
-        key=lambda row: (
-            -row["decisionScore"],
-            row["decisionGrade"] == "Pass",
-            row["edge"] is None,
-            -(row["edge"] or 0),
-        )
+    rows, errors, game_count = _build_week_rows(season, week, season_type)
+    out = {
+        "season": season,
+        "week": week,
+        "season_type": season_type,
+        "games": game_count,
+        "rows": rows,
+        "decision_summary": di.summarize_decisions(rows),
+        "delivery": dd.build_delivery(
+            rows,
+            limit=12,
+            game_errors=errors,
+            expected_games=game_count,
+        ),
+        "stats_season": pd.stats_season(season),
+        "odds_configured": odds_api.is_configured(),
+        "model_version": "p3.5-decision-delivery",
+        "ranking": "decision grade, decision score, then available price value",
+    }
+    _cache_set(key, out)
+    return jsonify(out)
+
+
+@props_bp.route("/api/quick-props/week")
+def api_quick_props_week():
+    """Terminal Quick Props contract for Dashboard/My Hub consumers."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    season_type = request.args.get(
+        "type", cw["season_type"] if season == cw["season"] else "REG"
+    )
+    limit = int(request.args.get("limit", "8"))
+    include_odds = request.args.get("pricing", "auto").lower() != "off"
+    cache_key = ("quick", season, week, season_type, limit, include_odds, "p3.5")
+    hit = _cache_get(cache_key)
+    if hit and request.args.get("refresh") != "1":
+        return jsonify(hit)
+    rows, errors, game_count = _build_week_rows(
+        season,
+        week,
+        season_type,
+        include_odds=include_odds,
+    )
+    delivery = dd.build_delivery(
+        rows,
+        limit=limit,
+        game_errors=errors,
+        expected_games=game_count,
     )
     out = {
         "season": season,
         "week": week,
         "season_type": season_type,
-        "games": len(games),
-        "rows": rows,
-        "decision_summary": di.summarize_decisions(rows),
+        "games": game_count,
         "stats_season": pd.stats_season(season),
-        "odds_configured": odds_api.is_configured(),
-        "model_version": "p3.4-simulation-decision",
-        "ranking": "simulation-confirmed model decision quality, then available price value",
+        "pricing": "enabled" if include_odds else "disabled",
+        **delivery,
     }
-    _cache_set(key, out)
+    _cache_set(cache_key, out, ttl=180)
     return jsonify(out)
 
 
@@ -301,7 +354,7 @@ def api_decisions_week():
 
 @props_bp.route("/api/edges/week")
 def api_edges_week():
-    """Quant feed: positive-EV priced rows with P3.4 decision metadata."""
+    """Quant feed: positive-EV priced rows with P3.5 delivery metadata."""
     min_ev = float(request.args.get("minEv", "0.03"))
     response = api_props_board()
     data = response.get_json()
