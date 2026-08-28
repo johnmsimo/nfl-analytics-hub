@@ -277,9 +277,18 @@ def game_delivery(delivery: dict[str, Any], game_id: str) -> dict[str, Any]:
     game_id = str(game_id)
     rows = [item for item in delivery.get("allMarkets") or [] if str(item.get("gameId")) == game_id]
     picks = [item for item in delivery.get("picks") or [] if str(item.get("gameId")) == game_id]
+    priced_rows = [row for row in rows if row.get("quoteStatus") in {"fresh", "stale"}]
+    if picks:
+        state = "actionable"
+    elif priced_rows:
+        state = "priced"
+    elif rows:
+        state = "model-only"
+    else:
+        state = "unavailable"
     return {
         "gameId": game_id,
-        "state": "actionable" if picks else ("priced" if rows else "unavailable"),
+        "state": state,
         "picks": picks,
         "markets": rows,
     }
