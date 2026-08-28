@@ -1,9 +1,10 @@
 """
-Game routes: weekly slate, single-game detail, lines/totals with de-vig
-fair probabilities, best-price EV and line shopping.
+Game routes: weekly slate, single-game detail, model-only P4.0 game decisions,
+lines/totals with de-vig fair probabilities, best-price EV and line shopping.
 
-Game lines are market-relative (no pretend power-rating model): fair prob =
-median de-vig across books, edge/EV = best available price vs that consensus.
+Market lines remain market-relative. P4.0 game intelligence is exposed through
+a separate model-only endpoint so model probability and sportsbook value are
+never conflated.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from flask import Blueprint, jsonify, request
 
 import nfl_data
 import odds_api
+import p40_game_intelligence
 import value_engine as ve
 
 games_bp = Blueprint("games", __name__)
@@ -117,6 +119,18 @@ def api_week():
         out.append(row)
     return jsonify({"season": season, "week": week, "season_type": stype,
                     "games": out})
+
+
+@games_bp.route("/api/game-decisions/week")
+def api_game_decisions_week():
+    """P4.0 model-only moneyline decisions; performs zero Odds API calls."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(p40_game_intelligence.build_week_report(season, week, stype))
 
 
 @games_bp.route("/api/game/<game_id>")
