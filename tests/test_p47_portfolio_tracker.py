@@ -39,10 +39,13 @@ def _row(
         "pairedFairBookCount": 3,
         "bestBook": "Book A",
         "bestPrice": -105,
+        "quoteAt": "2026-09-13T16:58:00+00:00",
         "quoteAgeSeconds": 30,
         "actionable": True,
         "opportunityState": "ACTIONABLE",
         "portfolioEligible": True,
+        "requestedStakePct": 0.025,
+        "requestedStakeDollars": 25.0,
         "recommendedStakePct": 0.025,
         "recommendedStakeDollars": 25.0,
         "recommendedStakeUnits": 2.5,
@@ -99,6 +102,35 @@ def test_non_actionable_row_cannot_be_converted_to_tracker_pick():
         raise AssertionError("non-actionable row unexpectedly converted")
 
 
+def test_tracking_key_binds_exact_displayed_price_and_allocation():
+    original = _row()
+    price_changed = dict(original)
+    price_changed["bestPrice"] = -110
+    stake_changed = dict(original)
+    stake_changed["recommendedStakeDollars"] = 20.0
+    assert p47.tracking_key(original) != p47.tracking_key(price_changed)
+    assert p47.tracking_key(original) != p47.tracking_key(stake_changed)
+
+
+def test_stale_displayed_confirmation_key_fails_closed_after_row_changes(monkeypatch):
+    displayed = _row()
+    stale_key = p47.tracking_key(displayed)
+    rebuilt = dict(displayed)
+    rebuilt["bestBook"] = "Book B"
+    rebuilt["bestPrice"] = -110
+    called = []
+    monkeypatch.setattr(p47.tracker, "add_pick", lambda payload: called.append(payload))
+    result = p47.confirm_portfolio_from_report(
+        _report([rebuilt]),
+        confirmed=True,
+        selection_keys=[stale_key],
+        persist=True,
+    )
+    assert result["ok"] is False
+    assert result["error"] == "unknown_portfolio_selection"
+    assert called == []
+
+
 def test_tracking_status_is_read_only_and_marks_existing_pick(monkeypatch):
     row = _row()
     store = {
@@ -120,6 +152,7 @@ def test_tracking_status_is_read_only_and_marks_existing_pick(monkeypatch):
     assert status["summary"]["trackedPicks"] == 1
     assert status["rows"][0]["tracked"] is True
     assert status["safety"]["trackerWrite"] is False
+    assert status["safety"]["confirmationBindsExactAllocation"] is True
     assert called == []
 
 
@@ -146,6 +179,23 @@ def test_dry_run_verifies_confirmation_path_without_persistence(monkeypatch):
     assert result["planned"] == 1
     assert result["saved"] == 0
     assert result["safety"]["trackerWrite"] is False
+
+
+def test_explicit_empty_selection_tracks_nothing(monkeypatch):
+    called = []
+    monkeypatch.setattr(p47.tracker, "list_picks", lambda: {})
+    monkeypatch.setattr(p47.tracker, "add_pick", lambda payload: called.append(payload))
+    result = p47.confirm_portfolio_from_report(
+        _report(),
+        confirmed=True,
+        selection_keys=[],
+        persist=True,
+    )
+    assert result["ok"] is True
+    assert result["planned"] == 0
+    assert result["saved"] == 0
+    assert result["existing"] == 0
+    assert called == []
 
 
 def test_confirmed_subset_saves_only_requested_portfolio_row(monkeypatch):
