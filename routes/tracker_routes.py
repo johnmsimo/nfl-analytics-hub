@@ -1,12 +1,14 @@
 """
 Tracker API: persistent pick CRUD, CLV/performance, publication ledger,
-automatic grading, closing capture, and bankroll settings.
+outcome-learning diagnostics, automatic grading, closing capture, and bankroll
+settings.
 """
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
 import decision_ledger
+import p38_learning
 import tracker
 from security import bounded_number, json_body, limiter
 
@@ -122,6 +124,11 @@ def api_ledger():
 @tracker_bp.route("/api/tracker/ledger/performance")
 def api_ledger_performance():
     return jsonify(decision_ledger.performance_summary())
+
+
+@tracker_bp.route("/api/tracker/learning")
+def api_learning():
+    return jsonify(p38_learning.build_learning_report())
 
 
 @tracker_bp.route("/api/tracker/grade", methods=["POST"])
