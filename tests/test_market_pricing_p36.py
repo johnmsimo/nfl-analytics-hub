@@ -47,6 +47,55 @@ def test_fresh_multibook_market_selects_best_price_and_devigs_consensus(monkeypa
     assert result["actionableValue"] is True
 
 
+def test_fresh_observation_remains_fresh_when_provider_price_has_not_changed(monkeypatch):
+    monkeypatch.setattr(mp, "ACTIONABLE_MAX_AGE_SECONDS", 900.0)
+    now = datetime(2026, 8, 28, 3, 0, tzinfo=UTC)
+    provider_updated = now - timedelta(seconds=3900)
+    observed = now - timedelta(seconds=5)
+    rows = [
+        {
+            **_row("Book A", "over", 110, provider_updated),
+            "fetched_at": observed.timestamp(),
+        },
+        {
+            **_row("Book A", "under", -130, provider_updated),
+            "fetched_at": observed.timestamp(),
+        },
+    ]
+
+    result = mp.assess_market(rows, side="over", model_probability=0.65, now=now)
+
+    assert result["quoteStatus"] == "fresh"
+    assert result["bestPrice"]["quoteAgeSeconds"] == 5.0
+    assert result["bestPrice"]["providerUpdateAgeSeconds"] == 3900.0
+    assert result["bestPrice"]["providerUpdatedAt"] == provider_updated.isoformat()
+    assert result["actionableValue"] is True
+
+
+def test_old_observation_stays_stale_even_if_provider_timestamp_is_newer(monkeypatch):
+    monkeypatch.setattr(mp, "ACTIONABLE_MAX_AGE_SECONDS", 900.0)
+    now = datetime(2026, 8, 28, 3, 0, tzinfo=UTC)
+    observed = now - timedelta(seconds=1200)
+    provider_updated = now - timedelta(seconds=60)
+    rows = [
+        {
+            **_row("Book A", "over", 120, provider_updated),
+            "fetched_at": observed.timestamp(),
+        },
+        {
+            **_row("Book A", "under", -140, provider_updated),
+            "fetched_at": observed.timestamp(),
+        },
+    ]
+
+    result = mp.assess_market(rows, side="over", model_probability=0.70, now=now)
+
+    assert result["quoteStatus"] == "stale"
+    assert result["bestPrice"]["quoteAgeSeconds"] == 1200.0
+    assert result["bestPrice"]["providerUpdateAgeSeconds"] == 60.0
+    assert result["actionableValue"] is False
+
+
 def test_stale_price_is_visible_but_never_actionable(monkeypatch):
     monkeypatch.setattr(mp, "ACTIONABLE_MAX_AGE_SECONDS", 900.0)
     now = datetime(2026, 8, 28, 2, 0, tzinfo=UTC)
