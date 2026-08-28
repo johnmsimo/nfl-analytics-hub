@@ -326,8 +326,6 @@ def _dashboard_payload(season: int, week: int, stype: str) -> dict:
             "projected_points": featured["projected_home"] if featured else None,
             "market_edge": round(market_edge, 4) if market_edge is not None else None,
             "injury_impact": None,
-            "quick_props": quick_props["summary"]["delivered"],
-            "lean_or_better": quick_props["summary"]["leanOrBetter"],
         },
         "kpi_status": kpi_status,
         "featured": featured,
