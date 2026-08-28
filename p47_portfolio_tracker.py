@@ -7,6 +7,7 @@ upgrading upstream actionability.
 Safety contract:
 - only rows already present in the P4.6 ``portfolio`` may be saved;
 - every write requires explicit user confirmation;
+- confirmation keys fingerprint the exact displayed price/model/allocation row;
 - GET/status and dry-run paths are read-only and provider-free;
 - repeated confirmations are idempotent through the Tracker's immutable
   first-save key while still allowing stake allocation updates;
@@ -14,6 +15,8 @@ Safety contract:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -25,6 +28,30 @@ MODEL_NAME = "p4.7-portfolio-tracker-confirmation"
 MODEL_VERSION = "p47-confirmed-tracker-v1"
 
 _MARKET_MAP = {"moneyline": "h2h", "spread": "spread", "total": "total"}
+_CONFIRMATION_FIELDS = (
+    "gameId",
+    "market",
+    "selectedSide",
+    "selectedTeam",
+    "line",
+    "bestBook",
+    "bestPrice",
+    "quoteAt",
+    "modelProbability",
+    "fairMarketProbability",
+    "referenceProbability",
+    "edge",
+    "evPct",
+    "decisionGrade",
+    "confidenceScore",
+    "recommendedStakePct",
+    "recommendedStakeDollars",
+    "recommendedStakeUnits",
+    "requestedStakePct",
+    "requestedStakeDollars",
+    "reasons",
+    "risks",
+)
 
 
 def _date_from_kickoff(value: Any) -> str:
@@ -49,14 +76,37 @@ def _line_token(value: Any) -> str:
         return str(value)
 
 
+def _confirmation_snapshot(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the material row state a user is actually confirming.
+
+    Deliberately excludes relative-age fields because they change continuously,
+    while binding the immutable quote timestamp, price, model outputs and exact
+    P4.6 allocation the user saw.
+    """
+    return {field: item.get(field) for field in _CONFIRMATION_FIELDS}
+
+
 def tracking_key(item: dict[str, Any]) -> str:
-    """Stable user-facing key for selecting one exact P4.6 allocation row."""
-    return "|".join(
+    """Fingerprint one exact displayed P4.6 allocation row.
+
+    If the book, price, model output or recommended stake changes before POST,
+    the rebuilt row receives a different key and the stale confirmation fails
+    closed as ``unknown_portfolio_selection``.
+    """
+    raw = json.dumps(
+        _confirmation_snapshot(item),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return ":".join(
         (
+            "p47",
             str(item.get("gameId") or ""),
             str(item.get("market") or ""),
             str(item.get("selectedSide") or ""),
-            _line_token(item.get("line")),
+            digest,
         )
     )
 
@@ -217,6 +267,7 @@ def build_tracking_status_from_portfolio(
             "automaticBetPlacement": False,
             "trackerWrite": False,
             "explicitConfirmationRequired": True,
+            "confirmationBindsExactAllocation": True,
             "inheritsP46PortfolioEligibility": True,
         },
     }
@@ -237,6 +288,8 @@ def confirm_portfolio_from_report(
     """Persist a confirmed subset of the current P4.6 portfolio to Tracker.
 
     ``persist=False`` exists for tests/production verification and never writes.
+    ``selection_keys=None`` means all current rows; an explicitly empty iterable
+    means no rows, never all rows.
     """
     if not confirmed:
         return {
@@ -250,7 +303,8 @@ def confirm_portfolio_from_report(
 
     portfolio = [dict(row) for row in report.get("portfolio") or []]
     by_key = {tracking_key(row): row for row in portfolio}
-    requested = list(dict.fromkeys(str(key) for key in (selection_keys or by_key.keys())))
+    selection_source: Iterable[str] = by_key.keys() if selection_keys is None else selection_keys
+    requested = list(dict.fromkeys(str(key) for key in selection_source))
     unknown = [key for key in requested if key not in by_key]
     if unknown:
         return {
@@ -277,6 +331,7 @@ def confirm_portfolio_from_report(
                 "automaticBetPlacement": False,
                 "trackerWrite": False,
                 "explicitUserConfirmation": True,
+                "confirmationBindsExactAllocation": True,
             },
         }
 
@@ -317,6 +372,7 @@ def confirm_portfolio_from_report(
             "automaticBetPlacement": False,
             "trackerWrite": True,
             "explicitUserConfirmation": True,
+            "confirmationBindsExactAllocation": True,
             "sportsbookExecution": False,
         },
     }
