@@ -30,19 +30,20 @@ def _edge(row: dict[str, Any]) -> float:
         return -1.0
 
 
+def _sort_key(row: dict[str, Any]) -> tuple:
+    return (
+        _GRADE_ORDER.get(str(row.get("decisionGrade") or "Pass"), 9),
+        -_score(row),
+        row.get("priceStatus") == "unpriced",
+        -_edge(row),
+        str(row.get("player") or ""),
+        str(row.get("marketKey") or ""),
+    )
+
+
 def sort_decisions(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return canonical P3.5 order: decision quality first, price second."""
-    return sorted(
-        rows,
-        key=lambda row: (
-            _GRADE_ORDER.get(str(row.get("decisionGrade") or "Pass"), 9),
-            -_score(row),
-            row.get("priceStatus") == "unpriced",
-            -_edge(row),
-            str(row.get("player") or ""),
-            str(row.get("marketKey") or ""),
-        ),
-    )
+    return sorted(rows, key=_sort_key)
 
 
 def build_delivery(
@@ -115,8 +116,7 @@ def verify_delivery_contract(payload: dict[str, Any]) -> dict[str, Any]:
     picks_are_non_pass = all(row.get("decisionGrade") in _PICK_GRADES for row in picks)
     watchlist_are_pass = all(row.get("decisionGrade") == "Pass" for row in watchlist)
     ordered = picks or watchlist
-    scores = [_score(row) for row in ordered]
-    score_ordered = all(a >= b for a, b in zip(scores, scores[1:])) if scores else True
+    canonical_order = ordered == sort_decisions(ordered)
     price_integrity = all(
         not row.get("actionable") or row.get("priceStatus") == "positive_value" for row in picks
     )
@@ -125,7 +125,7 @@ def verify_delivery_contract(payload: dict[str, Any]) -> dict[str, Any]:
         "terminal_state": terminal and valid_state,
         "pick_grade_integrity": picks_are_non_pass,
         "watchlist_integrity": watchlist_are_pass,
-        "decision_ordering": score_ordered,
+        "decision_ordering": canonical_order,
         "price_actionability_integrity": price_integrity,
     }
     return {"gates": gates, "ok": all(gates.values())}
