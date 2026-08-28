@@ -1,5 +1,5 @@
 """
-Tracker API: persistent pick CRUD, CLV/performance, publication ledger,
+Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
 outcome-learning diagnostics, calibration challenger governance, automatic
 grading, closing capture, and bankroll settings.
 """
@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 import decision_ledger
 import p38_learning
 import p39_calibration
+import p44_game_decision_ledger
 import tracker
 from security import bounded_number, json_body, limiter
 
@@ -92,6 +93,7 @@ def api_persistence():
         {
             "tracker": tracker.persistence_status(),
             "publicationLedger": decision_ledger.ledger_status(),
+            "gameDecisionLedger": p44_game_decision_ledger.ledger_status(),
         }
     )
 
@@ -118,6 +120,28 @@ def api_ledger_performance():
     return jsonify(decision_ledger.performance_summary())
 
 
+@tracker_bp.route("/api/tracker/game-ledger")
+def api_game_ledger():
+    season = request.args.get("season")
+    week = request.args.get("week")
+    limit = int(request.args.get("limit", "250"))
+    return jsonify(
+        {
+            "status": p44_game_decision_ledger.ledger_status(),
+            "receipts": p44_game_decision_ledger.list_receipts(
+                limit=limit,
+                season=int(season) if season is not None else None,
+                week=int(week) if week is not None else None,
+            ),
+        }
+    )
+
+
+@tracker_bp.route("/api/tracker/game-ledger/performance")
+def api_game_ledger_performance():
+    return jsonify(p44_game_decision_ledger.performance_summary())
+
+
 @tracker_bp.route("/api/tracker/learning")
 def api_learning():
     return jsonify(p38_learning.build_learning_report())
@@ -133,11 +157,15 @@ def api_calibration_challenger():
 def api_grade():
     tracked = tracker.grade_pending()
     ledger = decision_ledger.grade_pending()
+    game_ledger = p44_game_decision_ledger.grade_pending()
     return jsonify(
         {
-            "graded": int(tracked.get("graded", 0)) + int(ledger.get("graded", 0)),
+            "graded": int(tracked.get("graded", 0))
+            + int(ledger.get("graded", 0))
+            + int(game_ledger.get("graded", 0)),
             "trackerGraded": int(tracked.get("graded", 0)),
             "ledgerGraded": int(ledger.get("graded", 0)),
+            "gameLedgerGraded": int(game_ledger.get("graded", 0)),
         }
     )
 
@@ -146,6 +174,12 @@ def api_grade():
 @limiter.limit(10, 60, key="user")
 def api_ledger_grade():
     return jsonify(decision_ledger.grade_pending())
+
+
+@tracker_bp.route("/api/tracker/game-ledger/grade", methods=["POST"])
+@limiter.limit(10, 60, key="user")
+def api_game_ledger_grade():
+    return jsonify(p44_game_decision_ledger.grade_pending())
 
 
 @tracker_bp.route("/api/tracker/closing-capture", methods=["POST"])
