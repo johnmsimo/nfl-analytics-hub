@@ -86,13 +86,16 @@ def main() -> int:
     unpriced_item = (unpriced.get("opportunities") or [{}])[0]
     summary = delivery.get("summary") or {}
 
+    valid_week = target_week is not None and (
+        (target_type == "PRE" and target_week >= 0)
+        or (target_type in {"REG", "POST"} and target_week >= 1)
+    )
     gates = {
         "refresh_policy_enabled": status.get("enabled") is True,
         "next_slate_available": slate_identity_available,
         "next_slate_identity_valid": target_season == 2026
         and target_type in {"PRE", "REG", "POST"}
-        and target_week is not None
-        and target_week >= 1,
+        and valid_week,
         "opportunity_board_matches_next_slate": delivery.get("season") == target_season
         and delivery.get("seasonType") == target_type
         and delivery.get("week") == target_week,
