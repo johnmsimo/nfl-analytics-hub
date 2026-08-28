@@ -1,9 +1,12 @@
 """
 Game routes: weekly slate, single-game detail, P4.0 model decisions, P4.1
-sportsbook actionability, and market-relative line boards.
+sportsbook actionability, P4.2 durable hydrated market board, and market-relative
+line boards.
 
 P4.0 owns independent game probabilities. P4.1 joins those probabilities to
-verified sportsbook prices. Existing line-board routes remain market-relative.
+verified sportsbook prices. P4.2 serves an explicitly hydrated, durable weekly
+market snapshot without spending provider credits on ordinary product reads.
+Existing line-board routes remain market-relative.
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ import nfl_data
 import odds_api
 import p40_game_intelligence
 import p41_game_market_pricing
+import p42_live_market_hydration
 import value_engine as ve
 
 games_bp = Blueprint("games", __name__)
@@ -158,6 +162,36 @@ def api_game_market_decisions_week():
             pricing_mode=pricing,
         )
     )
+
+
+@games_bp.route("/api/game-market-board/week")
+def api_game_market_board_week():
+    """P4.2 cache-only actionable game board from explicit live hydration."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(
+        p42_live_market_hydration.build_cached_week_board(
+            season,
+            week,
+            stype,
+        )
+    )
+
+
+@games_bp.route("/api/game-market-hydration/status")
+def api_game_market_hydration_status():
+    """Sanitized P4.2 cache status; performs zero provider requests."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(p42_live_market_hydration.cache_status(season, week, stype))
 
 
 @games_bp.route("/api/game/<game_id>")
