@@ -76,13 +76,70 @@ def _reason_list(row: dict[str, Any], market: dict[str, Any]) -> list[str]:
     return reasons[:3]
 
 
+def _model_only_moneyline(row: dict[str, Any]) -> dict[str, Any]:
+    """Preserve a P4.0 model decision when no sportsbook event is available.
+
+    P4.1 intentionally leaves ``markets`` empty when an event cannot be matched.
+    That is correct for pricing, but the delivery layer must not erase the model
+    decision completely. This creates an explicitly unpriced, non-actionable
+    moneyline view so P4.5 can surface MODEL opportunities without inventing a
+    sportsbook price, spread, total, edge, EV, or Kelly value.
+    """
+    selected_side = str(row.get("selectedSide") or "").lower()
+    if selected_side not in {"home", "away"}:
+        home_probability = _num(row.get("homeWinProbability"))
+        selected_side = "home" if home_probability is None or home_probability >= 0.5 else "away"
+    selected_team = row.get("selectedTeam")
+    if not selected_team:
+        selected_team = row.get("homeTeam") if selected_side == "home" else row.get("awayTeam")
+    probability = _num(row.get("selectedProbability"))
+    if probability is None:
+        probability = _num(
+            row.get("homeWinProbability")
+            if selected_side == "home"
+            else row.get("awayWinProbability")
+        )
+    probability = probability if probability is not None else 0.5
+    return {
+        "market": "moneyline",
+        "line": None,
+        "selectedSide": selected_side,
+        "selectedTeam": selected_team,
+        "modelProbability": round(probability, 4),
+        "confidenceScore": row.get("confidenceScore"),
+        "decisionGrade": row.get("decisionGrade") or "Pass",
+        "pricing": {
+            "side": selected_side,
+            "quoteStatus": "unpriced",
+            "priceStatus": "unpriced",
+            "bestPrice": None,
+            "quotedBookCount": 0,
+            "freshBookCount": 0,
+            "pairedFairBookCount": 0,
+            "fairMarketProbability": None,
+            "impliedProbability": None,
+            "referenceProbability": None,
+            "modelProbability": round(probability, 4),
+            "edge": None,
+            "evPct": None,
+            "kellyPct": None,
+            "actionableValue": False,
+        },
+        "actionable": False,
+        "modelOnlyFallback": True,
+    }
+
+
 def flatten_board(board: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten one P4.2 board into UI-ready market decisions."""
     hydrated_at = board.get("hydratedAt")
     hydration_age = board.get("hydrationAgeSeconds")
     items: list[dict[str, Any]] = []
     for row in board.get("rows") or []:
-        for key, market in (row.get("markets") or {}).items():
+        markets = row.get("markets") if isinstance(row.get("markets"), dict) else {}
+        if not markets and row.get("gameId"):
+            markets = {"moneyline": _model_only_moneyline(row)}
+        for key, market in markets.items():
             if not isinstance(market, dict):
                 continue
             pricing = market.get("pricing") if isinstance(market.get("pricing"), dict) else {}
@@ -119,6 +176,7 @@ def flatten_board(board: dict[str, Any]) -> list[dict[str, Any]]:
                 "quoteAgeSeconds": best.get("quoteAgeSeconds") if best else None,
                 "expiresInSeconds": best.get("expiresInSeconds") if best else None,
                 "actionable": bool(market.get("actionable")),
+                "modelOnlyFallback": bool(market.get("modelOnlyFallback")),
                 "reasons": _reason_list(row, market),
                 "risks": _risk_list(row, market),
                 "hydratedAt": hydrated_at,
