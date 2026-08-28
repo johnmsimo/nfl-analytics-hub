@@ -197,5 +197,6 @@ def test_p45_scheduler_and_product_surface_are_wired():
     assert '"scheduler_job_registered": scheduler_job_registered' in verifier
     assert 'target_week = int(slate["week"])' in verifier
     assert 'target_type = str(slate["seasonType"]).upper()' in verifier
+    assert '(target_type == "PRE" and target_week >= 0)' in verifier
     assert '"opportunity_board_matches_next_slate"' in verifier
     assert "next_slate_is_2026_reg_week_one" not in verifier
