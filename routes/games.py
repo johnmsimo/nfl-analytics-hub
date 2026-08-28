@@ -2,7 +2,8 @@
 Game routes: weekly slate, single-game detail, P4.0 model decisions, P4.1
 sportsbook actionability, P4.2 durable hydrated market board, P4.3 decision-first
 delivery, P4.4 immutable game-publication receipts, P4.5 smart market freshness,
-P4.6 bankroll-aware portfolio allocation, and market-relative boards.
+P4.6 bankroll-aware portfolio allocation, P4.7 explicit Tracker confirmation,
+and market-relative boards.
 """
 from __future__ import annotations
 
@@ -19,7 +20,9 @@ import p43_game_decision_delivery
 import p44_game_decision_ledger
 import p45_smart_market_refresh
 import p46_game_portfolio
+import p47_portfolio_tracker
 import value_engine as ve
+from security import json_body, limiter
 
 games_bp = Blueprint("games", __name__)
 
@@ -203,6 +206,51 @@ def api_game_portfolio_week():
     if stype not in {"PRE", "REG", "POST"}:
         return jsonify({"error": "invalid season type"}), 400
     return jsonify(p46_game_portfolio.build_week_portfolio(season, week, stype))
+
+
+@games_bp.route("/api/game-portfolio/tracking/week")
+def api_game_portfolio_tracking_week():
+    """P4.7 read-only view of which current P4.6 allocations are in Tracker."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(p47_portfolio_tracker.build_week_tracking_status(season, week, stype))
+
+
+@games_bp.route("/api/game-portfolio/track", methods=["POST"])
+@limiter.limit(20, 60, key="user")
+def api_game_portfolio_track():
+    """Persist only explicitly confirmed current P4.6 allocations to Tracker."""
+    payload = json_body(allowed={"season", "week", "type", "confirmed", "selectionKeys"})
+    cw = nfl_data.current_week()
+    try:
+        season = int(payload.get("season", cw["season"]))
+        week = int(payload.get("week", cw["week"]))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid season or week"}), 400
+    stype = str(payload.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    confirmed = payload.get("confirmed") is True
+    selection_keys = payload.get("selectionKeys")
+    if selection_keys is not None:
+        if not isinstance(selection_keys, list) or len(selection_keys) > 20 or not all(isinstance(key, str) and len(key) <= 200 for key in selection_keys):
+            return jsonify({"error": "invalid selectionKeys"}), 400
+    result = p47_portfolio_tracker.confirm_week_portfolio(
+        season,
+        week,
+        stype,
+        confirmed=confirmed,
+        selection_keys=selection_keys,
+        persist=True,
+    )
+    if not result.get("ok"):
+        status = 409 if result.get("error") == "explicit_confirmation_required" else 400
+        return jsonify(result), status
+    return jsonify(result)
 
 
 @games_bp.route("/api/game-market-refresh/status")
