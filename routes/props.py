@@ -64,6 +64,7 @@ def _build_game_rows(game: dict, season: int, *, include_odds: bool = True) -> l
 
     ``include_odds=False`` is used by protected read-only verification so the
     model/delivery contract can be checked without consuming provider credits.
+    The default two-argument call remains backward compatible.
     """
     ss = pd.stats_season(season)
     logs = pd.player_game_logs(ss)
@@ -235,7 +236,14 @@ def _build_week_rows(
     errors = 0
     for game in games:
         try:
-            rows.extend(_build_game_rows(game, season, include_odds=include_odds))
+            # Preserve the historical two-argument call path for normal product
+            # traffic and wrappers/tests. Only the read-only verification path
+            # needs to opt out of provider pricing explicitly.
+            if include_odds:
+                game_rows = _build_game_rows(game, season)
+            else:
+                game_rows = _build_game_rows(game, season, include_odds=False)
+            rows.extend(game_rows)
         except Exception:  # noqa: BLE001 - delivery reports partial/degraded state explicitly
             errors += 1
     return dd.sort_decisions(rows), errors, len(games)
