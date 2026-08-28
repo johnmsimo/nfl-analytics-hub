@@ -13,6 +13,7 @@ def _item(
     ev: float | None = 0.10,
     edge: float | None = 0.08,
     price: int | None = -110,
+    model_probability: float = 0.65,
 ) -> dict:
     actionable = state == "ACTIONABLE"
     return {
@@ -27,7 +28,7 @@ def _item(
         "priceStatus": "positive_value" if actionable else "unpriced",
         "decisionGrade": grade,
         "confidenceScore": 80.0,
-        "modelProbability": 0.65,
+        "modelProbability": model_probability,
         "fairMarketProbability": 0.55 if actionable else None,
         "edge": edge,
         "evPct": ev,
@@ -97,15 +98,17 @@ def test_per_bet_game_and_slate_caps_are_respected(monkeypatch):
     assert p46.verify_portfolio(report)["ok"] is True
 
 
-def test_fractional_kelly_scales_stake_before_caps():
+def test_fractional_kelly_is_recomputed_from_probability_and_price_before_caps():
     report = p46.build_portfolio_from_opportunities(
-        _board([_item("g1", kelly=0.08)]),
+        _board([_item("g1", kelly=0.01, model_probability=0.56, price=-110)]),
         settings=_settings(kelly_fraction=0.25, max_bet_pct=0.05),
     )
     row = report["portfolio"][0]
-    assert row["requestedStakePct"] == 0.02
-    assert row["recommendedStakeDollars"] == 20.0
-    assert row["recommendedStakeUnits"] == 2.0
+    # Full Kelly is 7.6%; quarter Kelly is 1.9%. The deliberately incorrect
+    # upstream kellyPct=1% must not be fractionalized a second time.
+    assert row["requestedStakePct"] == 0.019
+    assert row["recommendedStakeDollars"] == 19.0
+    assert row["recommendedStakeUnits"] == 1.9
 
 
 def test_zero_kelly_fraction_disables_recommended_staking():
