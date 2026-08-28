@@ -8,6 +8,7 @@ import decision_delivery as dd
 import market_pricing as mp
 import nfl_data
 import odds_api
+import projections as pj
 from routes.props import _build_week_rows
 
 
@@ -29,13 +30,7 @@ def _priced_game_ids(rows: list[dict[str, Any]]) -> set[str]:
 
 
 def _select_refresh_target(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Prefer a model pick from a game already known to produce price rows.
-
-    A successful provider refresh is only useful to the P3.6 gate when the
-    refreshed event maps back to the app's player-market rows. Existing stale
-    cache is sufficient evidence that a game has parseable/matchable pricing,
-    so target that set before spending the single controlled provider request.
-    """
+    """Prefer a model pick from a game already known to produce price rows."""
     priced_games = _priced_game_ids(rows)
     delivery = dd.build_delivery(rows, limit=max(len(rows), 100))
     for row in delivery.get("picks") or []:
@@ -100,14 +95,168 @@ def _price_game_diagnostics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _select_verification_period(target_season: int) -> dict[str, Any]:
-    """Choose the earliest current-or-future period represented by provider cache.
+def _provider_payload_diagnostic(
+    game: dict[str, Any],
+    model_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Explain why one cached provider snapshot does or does not map to app rows.
 
-    The app schedule can be in preseason while The Odds API game catalog has
-    already rolled forward to regular season. A production pricing verifier must
-    not spend a refresh on a period the provider cannot identify. This selector
-    uses cache-only event matching and therefore consumes zero provider credits.
+    This is cache-only. It never requests provider data and intentionally emits
+    counts plus tiny samples rather than the full payload.
     """
+    game_id = str(game.get("game_id") or "")
+    event = odds_api.find_event_for_game(game, cache_only=True)
+    if not event:
+        return {
+            "gameId": game_id,
+            "eventId": None,
+            "diagnosis": "provider_event_not_found",
+            "snapshotAvailable": False,
+        }
+
+    event_id = str(event.get("id") or "")
+    snapshot = odds_api.event_props_snapshot(event_id)
+    data = snapshot.get("data")
+    if not isinstance(data, dict):
+        return {
+            "gameId": game_id,
+            "eventId": event_id,
+            "diagnosis": "props_snapshot_missing_or_empty",
+            "snapshotAvailable": bool(snapshot.get("available")),
+            "snapshotAgeSeconds": snapshot.get("age_seconds"),
+        }
+
+    bookmakers = data.get("bookmakers") or []
+    if not isinstance(bookmakers, list):
+        bookmakers = []
+    market_keys: set[str] = set()
+    raw_outcomes = 0
+    for bookmaker in bookmakers:
+        if not isinstance(bookmaker, dict):
+            continue
+        markets = bookmaker.get("markets") or []
+        if not isinstance(markets, list):
+            continue
+        for market in markets:
+            if not isinstance(market, dict):
+                continue
+            key = str(market.get("key") or "")
+            if key:
+                market_keys.add(key)
+            outcomes = market.get("outcomes") or []
+            if isinstance(outcomes, list):
+                raw_outcomes += len(outcomes)
+
+    parsed = odds_api.parse_prop_markets(data, fetched_at=snapshot.get("fetched_at"))
+    usable: list[tuple[dict[str, Any], str]] = []
+    for quote in parsed:
+        market = pj.ODDS_KEY_TO_MARKET.get(str(quote.get("base_key") or ""))
+        if market and isinstance(quote.get("line"), (int, float)):
+            usable.append((quote, market))
+
+    projected_pairs = {
+        (odds_api.norm_player_name(str(row.get("player") or "")), str(row.get("marketKey") or ""))
+        for row in model_rows
+        if str(row.get("gameId") or "") == game_id and row.get("player") and row.get("marketKey")
+    }
+    projected_players = {player for player, _ in projected_pairs if player}
+    projected_markets = {market for _, market in projected_pairs if market}
+    provider_pairs = {
+        (odds_api.norm_player_name(str(quote.get("player") or "")), market)
+        for quote, market in usable
+        if quote.get("player")
+    }
+    provider_players = {player for player, _ in provider_pairs if player}
+    provider_markets = {market for _, market in provider_pairs if market}
+    player_overlap = provider_players & projected_players
+    market_overlap = provider_markets & projected_markets
+    pair_overlap = provider_pairs & projected_pairs
+
+    recognized_market_keys = sorted(
+        key
+        for key in market_keys
+        if pj.ODDS_KEY_TO_MARKET.get(key.replace("_alternate", "")) is not None
+    )
+    if not bookmakers:
+        diagnosis = "provider_props_not_posted"
+    elif not market_keys:
+        diagnosis = "provider_props_not_posted"
+    elif not parsed:
+        diagnosis = "provider_markets_not_parseable"
+    elif not usable:
+        diagnosis = "provider_markets_not_supported_by_app"
+    elif not player_overlap:
+        diagnosis = "provider_player_names_do_not_overlap_model"
+    elif not market_overlap:
+        diagnosis = "provider_markets_do_not_overlap_model"
+    elif not pair_overlap:
+        diagnosis = "provider_player_market_pairs_do_not_overlap_model"
+    else:
+        diagnosis = "matchable_quotes_present"
+
+    return {
+        "gameId": game_id,
+        "eventId": event_id,
+        "diagnosis": diagnosis,
+        "snapshotAvailable": bool(snapshot.get("available")),
+        "snapshotAgeSeconds": snapshot.get("age_seconds"),
+        "bookmakers": len(bookmakers),
+        "marketKeys": sorted(market_keys)[:20],
+        "recognizedMarketKeys": recognized_market_keys[:20],
+        "rawOutcomes": raw_outcomes,
+        "parsedQuoteRows": len(parsed),
+        "usableQuoteRows": len(usable),
+        "providerPlayers": len(provider_players),
+        "projectedPlayers": len(projected_players),
+        "playerOverlap": len(player_overlap),
+        "providerMarkets": sorted(provider_markets),
+        "projectedMarkets": sorted(projected_markets),
+        "marketOverlap": sorted(market_overlap),
+        "matchablePlayerMarketPairs": len(pair_overlap),
+        "providerPlayerSamples": sorted(provider_players)[:5],
+        "modelPlayerSamples": sorted(projected_players)[:5],
+    }
+
+
+def _provider_payload_diagnostics(
+    target_season: int,
+    week: int,
+    season_type: str,
+    model_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    games = nfl_data.get_week_games(target_season, week, season_type)
+    details = [_provider_payload_diagnostic(game, model_rows) for game in games]
+    snapshots = [item for item in details if item.get("snapshotAvailable")]
+    with_bookmakers = [item for item in snapshots if int(item.get("bookmakers") or 0) > 0]
+    with_usable_quotes = [item for item in snapshots if int(item.get("usableQuoteRows") or 0) > 0]
+    with_matchable_quotes = [
+        item for item in snapshots if int(item.get("matchablePlayerMarketPairs") or 0) > 0
+    ]
+
+    if not snapshots:
+        classification = "no_cached_prop_snapshots"
+    elif not with_bookmakers:
+        classification = "provider_player_props_not_posted"
+    elif not with_usable_quotes:
+        classification = "provider_payload_not_supported_or_parseable"
+    elif not with_matchable_quotes:
+        classification = "provider_payload_does_not_overlap_model"
+    else:
+        classification = "matchable_provider_quotes_available"
+
+    return {
+        "classification": classification,
+        "games": len(games),
+        "snapshotsAvailable": len(snapshots),
+        "gamesWithBookmakers": len(with_bookmakers),
+        "gamesWithUsableQuotes": len(with_usable_quotes),
+        "gamesWithMatchableQuotes": len(with_matchable_quotes),
+        "details": details,
+    }
+
+
+def _select_verification_period(target_season: int) -> dict[str, Any]:
+    """Choose the earliest current-or-future period represented by provider cache."""
     current = nfl_data.current_week(target_season)
     current_week = int(current["week"])
     current_type = str(current.get("season_type") or "REG")
@@ -172,13 +321,7 @@ def readiness_snapshot(
     *,
     refresh_mode: str = "cache",
 ) -> dict[str, Any]:
-    """Verify P3.6 using cache-only reads, with one explicit optional refresh.
-
-    ``refresh_mode='one-event'`` may spend Odds API credits and is only intended
-    for the protected workflow's explicit confirmation option. Target selection
-    itself is cache-only and prefers a game already known to produce app price
-    rows, then all verification after the refresh is cache-only again.
-    """
+    """Verify P3.6 using cache-only reads, with one explicit optional refresh."""
     started = time.monotonic()
     period = _select_verification_period(target_season)
     week = int(period["week"])
@@ -186,14 +329,21 @@ def readiness_snapshot(
     refresh = str(refresh_mode).lower() == "one-event"
     refresh_result = None
 
+    cached_rows, cached_errors, _ = _build_week_rows(
+        target_season,
+        week,
+        season_type,
+        include_odds=True,
+        cache_only_odds=True,
+    )
+    payload_diagnostics = _provider_payload_diagnostics(
+        target_season,
+        week,
+        season_type,
+        cached_rows,
+    )
+
     if refresh:
-        cached_rows, model_errors, _ = _build_week_rows(
-            target_season,
-            week,
-            season_type,
-            include_odds=True,
-            cache_only_odds=True,
-        )
         target = _select_refresh_target(cached_rows)
         target_game_id = target.get("gameId")
         games = {
@@ -212,8 +362,8 @@ def readiness_snapshot(
                 "ok": False,
                 "reason": "no_refresh_target_game_available",
             }
-        if model_errors:
-            refresh_result["modelErrors"] = model_errors
+        if cached_errors:
+            refresh_result["modelErrors"] = cached_errors
 
     rows, errors, game_count = _build_week_rows(
         target_season,
@@ -241,6 +391,19 @@ def readiness_snapshot(
             (cell for cell in game_diagnostics if cell["gameId"] == refreshed_game),
             None,
         )
+        refreshed_game_obj = next(
+            (
+                game
+                for game in nfl_data.get_week_games(target_season, week, season_type)
+                if str(game.get("game_id") or "") == refreshed_game
+            ),
+            None,
+        )
+        if refreshed_game_obj is not None:
+            refresh_result["providerPayload"] = _provider_payload_diagnostic(
+                refreshed_game_obj,
+                rows,
+            )
     provider = odds_api.snapshot_status()
     build_seconds = round(time.monotonic() - started, 3)
 
@@ -264,7 +427,13 @@ def readiness_snapshot(
         "bounded_build_time": build_seconds <= thresholds["maximumBuildSeconds"],
     }
     if refresh:
+        payload_ok = bool(
+            refresh_result
+            and isinstance(refresh_result.get("providerPayload"), dict)
+            and int(refresh_result["providerPayload"].get("usableQuoteRows") or 0) > 0
+        )
         gates["explicit_refresh_succeeded"] = bool(refresh_result and refresh_result.get("ok"))
+        gates["explicit_refresh_returned_usable_props"] = payload_ok
         gates["refresh_target_known_priced"] = bool(
             refresh_result and int(refresh_result.get("knownPricedGames") or 0) > 0
         )
@@ -279,6 +448,7 @@ def readiness_snapshot(
         "games": game_count,
         "buildSeconds": build_seconds,
         "provider": provider,
+        "providerPayloadDiagnostics": payload_diagnostics,
         "refresh": refresh_result,
         "pricing": {
             "rows": len(rows),
