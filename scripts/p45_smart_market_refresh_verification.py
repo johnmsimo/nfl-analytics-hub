@@ -46,8 +46,31 @@ def main() -> int:
 
     with app.app_context():
         status = p45.refresh_status(2026)
-        delivery = p45.build_week_opportunities(2026, 1, "REG", limit=20)
-        audit = p45.verify_opportunity_contract(delivery)
+        slate = status.get("slate") or {}
+        slate_identity_available = (
+            status.get("available") is True
+            and slate.get("season") is not None
+            and slate.get("week") is not None
+            and slate.get("seasonType") is not None
+        )
+        if slate_identity_available:
+            target_season = int(slate["season"])
+            target_week = int(slate["week"])
+            target_type = str(slate["seasonType"]).upper()
+            delivery = p45.build_week_opportunities(
+                target_season,
+                target_week,
+                target_type,
+                limit=20,
+            )
+            audit = p45.verify_opportunity_contract(delivery)
+        else:
+            target_season = None
+            target_week = None
+            target_type = None
+            delivery = {}
+            audit = {"ok": False}
+
         scheduler_row = db.session.scalar(
             db.select(ScheduledJob).where(ScheduledJob.key == "game-market-refresh")
         )
@@ -62,14 +85,20 @@ def main() -> int:
     stale_item = (stale.get("opportunities") or [{}])[0]
     unpriced_item = (unpriced.get("opportunities") or [{}])[0]
     summary = delivery.get("summary") or {}
-    slate = status.get("slate") or {}
 
+    valid_week = target_week is not None and (
+        (target_type == "PRE" and target_week >= 0)
+        or (target_type in {"REG", "POST"} and target_week >= 1)
+    )
     gates = {
         "refresh_policy_enabled": status.get("enabled") is True,
-        "next_slate_available": status.get("available") is True,
-        "next_slate_is_2026_reg_week_one": slate.get("season") == 2026
-        and slate.get("seasonType") == "REG"
-        and slate.get("week") == 1,
+        "next_slate_available": slate_identity_available,
+        "next_slate_identity_valid": target_season == 2026
+        and target_type in {"PRE", "REG", "POST"}
+        and valid_week,
+        "opportunity_board_matches_next_slate": delivery.get("season") == target_season
+        and delivery.get("seasonType") == target_type
+        and delivery.get("week") == target_week,
         "status_check_is_zero_credit": status.get("providerSpend") is False,
         "scheduler_job_registered": scheduler_job_registered,
         "opportunity_contract_valid": audit.get("ok") is True,
@@ -98,6 +127,11 @@ def main() -> int:
             "cache": status.get("cache"),
         },
         "opportunities": {
+            "target": {
+                "season": target_season,
+                "seasonType": target_type,
+                "week": target_week,
+            },
             "state": delivery.get("state"),
             "message": delivery.get("message"),
             "summary": summary,
