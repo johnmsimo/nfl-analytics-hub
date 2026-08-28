@@ -88,12 +88,17 @@ def _candidate_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _setting_number(source: dict[str, Any], key: str, default: float) -> float:
+    value = _number(source.get(key), default)
+    return default if value is None else float(value)
+
+
 def _settings(raw: dict[str, Any] | None = None) -> dict[str, float]:
-    source = dict(raw or tracker.get_settings())
-    bankroll = max(0.0, _number(source.get("bankroll"), 1000.0) or 1000.0)
-    kelly_fraction = _clamp(_number(source.get("kelly_fraction"), 0.25) or 0.25, 0.0, 1.0)
-    max_bet_pct = _clamp(_number(source.get("max_bet_pct"), 0.05) or 0.05, 0.001, 1.0)
-    unit_pct = _clamp(_number(source.get("unit_pct"), 0.01) or 0.01, 0.001, 0.10)
+    source = dict(raw if raw is not None else tracker.get_settings())
+    bankroll = max(0.0, _setting_number(source, "bankroll", 1000.0))
+    kelly_fraction = _clamp(_setting_number(source, "kelly_fraction", 0.25), 0.0, 1.0)
+    max_bet_pct = _clamp(_setting_number(source, "max_bet_pct", 0.05), 0.001, 1.0)
+    unit_pct = _clamp(_setting_number(source, "unit_pct", 0.01), 0.001, 0.10)
     return {
         "bankroll": round(bankroll, 2),
         "kellyFraction": round(kelly_fraction, 4),
