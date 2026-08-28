@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+
 from flask import Blueprint, jsonify, request
 
 import nfl_data
+import player_intelligence as pi
 import projection_data as pd
 import projections as pj
 from routes.dashboard_api import _team_power
@@ -44,124 +46,186 @@ def _next_opponent(team: str, season: int) -> str | None:
 
 @intelligence_bp.route("/api/analytics")
 def api_analytics():
-    season, ss = _season()
-    summaries = nfl_data.team_summaries(ss)
-    logs = pd.player_game_logs(ss)
-    idx = pd.player_index(season, ss)
-    dvp = pd.defense_vs_position(ss)
+    season, stats_season = _season()
+    summaries = nfl_data.team_summaries(stats_season)
+    logs = pd.player_game_logs(stats_season)
+    index = pd.player_index(season, stats_season)
+    dvp = pd.defense_vs_position(stats_season)
 
     teams = []
     for code, row in summaries.items():
         diff = round(row.get("ppg", 0) - row.get("papg", 0), 1)
-        teams.append({
-            "team": code,
-            "record": row.get("record", "0-0"),
-            "games": row.get("games", 0),
-            "ppg": row.get("ppg", 0),
-            "papg": row.get("papg", 0),
-            "point_diff": diff,
-            "power_score": _team_power(row),
-            "next_opponent": _next_opponent(code, season),
-        })
-    teams.sort(key=lambda row: (row["power_score"] is None,
-                                -(row["power_score"] or 0)))
+        teams.append(
+            {
+                "team": code,
+                "record": row.get("record", "0-0"),
+                "games": row.get("games", 0),
+                "ppg": row.get("ppg", 0),
+                "papg": row.get("papg", 0),
+                "point_diff": diff,
+                "power_score": _team_power(row),
+                "next_opponent": _next_opponent(code, season),
+            }
+        )
+    teams.sort(key=lambda row: (row["power_score"] is None, -(row["power_score"] or 0)))
 
     market_rows = []
     position_counts = defaultdict(int)
-    for pid, meta in idx.items():
-        history = logs.get(pid, [])
+    for player_id, meta in index.items():
+        history = logs.get(player_id, [])
         if len(history) < 3:
             continue
-        position_counts[meta["position"]] += 1
+        position = meta["position"]
+        position_counts[position] += 1
         opponent = _next_opponent(meta["team"], season)
-        for market in pj.relevant_markets(meta["position"]):
-            proj = pj.project_stat(history, market, opponent=opponent, dvp=dvp,
-                                   position=meta["position"])
-            if not proj or proj["mean"] < pj.MIN_MEAN[market]:
+        if not opponent:
+            continue
+        for market in pj.relevant_markets(position):
+            preview = pi.analyze_projection(
+                history,
+                market,
+                opponent=opponent,
+                dvp=dvp,
+                position=position,
+                roster_verified=bool(meta.get("rosterVerified")),
+            )
+            if not preview or preview["mean"] < pj.MIN_MEAN[market]:
                 continue
-            line = 0.5 if market == "anytime_td" else int(proj["mean"]) + 0.5
-            prob = pj.prob_over(proj, line)
-            market_rows.append({
-                "playerId": pid, "player": meta["name"], "team": meta["team"],
-                "position": meta["position"], "marketKey": market,
-                "marketLabel": pj.MARKET_LABELS[market], "projection": round(proj["mean"], 1),
-                "line": line, "probOver": round(prob, 4), "opponent": opponent,
-                "signal": round(abs(prob - .5), 4),
-                "evidenceSeason": ss,
-                "rosterVerified": bool(meta.get("rosterVerified")),
-            })
-    market_rows.sort(key=lambda x: x["signal"], reverse=True)
+            line = 0.5 if market == "anytime_td" else int(preview["mean"]) + 0.5
+            intelligence = pi.analyze_projection(
+                history,
+                market,
+                opponent=opponent,
+                dvp=dvp,
+                position=position,
+                line=line,
+                roster_verified=bool(meta.get("rosterVerified")),
+            )
+            if not intelligence or intelligence.get("probOver") is None:
+                continue
+            market_rows.append(
+                {
+                    "playerId": player_id,
+                    "player": meta["name"],
+                    "team": meta["team"],
+                    "position": position,
+                    "marketKey": market,
+                    "marketLabel": pj.MARKET_LABELS[market],
+                    "projection": round(intelligence["mean"], 1),
+                    "projectionRange": intelligence["interval"],
+                    "line": line,
+                    "rawProbOver": intelligence["rawProbOver"],
+                    "probOver": intelligence["probOver"],
+                    "opponent": opponent,
+                    "matchupGrade": intelligence["matchup"]["grade"],
+                    "matchupFactor": intelligence["matchup"]["factor"],
+                    "confidenceScore": intelligence["confidence"]["score"],
+                    "confidenceGrade": intelligence["confidence"]["grade"],
+                    "riskFlags": intelligence["riskFlags"],
+                    "signal": intelligence["signalStrength"],
+                    "rankScore": pi.ranking_score(intelligence),
+                    "evidenceSeason": stats_season,
+                    "rosterVerified": bool(meta.get("rosterVerified")),
+                    "modelVersion": intelligence["modelVersion"],
+                }
+            )
+    market_rows.sort(key=lambda row: row["rankScore"], reverse=True)
 
-    total_games = sum(t["games"] for t in teams)
-    avg_points = round(sum(t["ppg"] for t in teams) / max(len(teams), 1), 1)
-    avg_diff = round(sum(abs(t["point_diff"]) for t in teams) / max(len(teams), 1), 1)
-    return jsonify({
-        "season": season, "stats_season": ss,
-        "kpis": {
-            "teams": len(teams), "player_pool": len(idx), "team_games": total_games,
-            "avg_points": avg_points, "avg_abs_diff": avg_diff,
-            "projection_signals": len(market_rows),
-        },
-        "team_efficiency": teams,
-        "top_signals": market_rows[:20],
-        "position_pool": [{"position": k, "players": v} for k, v in sorted(position_counts.items())],
-        "methodology": "Descriptive team efficiency plus transparent distribution-based player projections backed by normalized warehouse game facts and the current-season roster. Signals measure distance from a 50% over probability at a reference line; they are not betting recommendations.",
-    })
+    total_games = sum(team["games"] for team in teams)
+    avg_points = round(sum(team["ppg"] for team in teams) / max(len(teams), 1), 1)
+    avg_diff = round(sum(abs(team["point_diff"]) for team in teams) / max(len(teams), 1), 1)
+    return jsonify(
+        {
+            "season": season,
+            "stats_season": stats_season,
+            "model_version": "p3.3-evidence-calibrated",
+            "kpis": {
+                "teams": len(teams),
+                "player_pool": len(index),
+                "team_games": total_games,
+                "avg_points": avg_points,
+                "avg_abs_diff": avg_diff,
+                "projection_signals": len(market_rows),
+            },
+            "team_efficiency": teams,
+            "top_signals": market_rows[:20],
+            "position_pool": [
+                {"position": position, "players": players}
+                for position, players in sorted(position_counts.items())
+            ],
+            "methodology": (
+                "P3.3 uses normalized warehouse histories plus the current roster, "
+                "distribution-based projections, defense-vs-position matchup context, "
+                "uncertainty bands, and evidence-aware probability shrinkage. Confidence "
+                "measures evidence quality and stability; it is not a guarantee of outcome."
+            ),
+        }
+    )
 
 
 @intelligence_bp.route("/api/rankings")
 def api_rankings():
-    season, ss = _season()
-    summaries = nfl_data.team_summaries(ss)
-    logs = pd.player_game_logs(ss)
-    idx = pd.player_index(season, ss)
+    season, stats_season = _season()
+    summaries = nfl_data.team_summaries(stats_season)
+    logs = pd.player_game_logs(stats_season)
+    index = pd.player_index(season, stats_season)
 
-    team_rows = [{
-        **row,
-        "power_score": _team_power(row),
-        "point_diff": round(row.get("ppg", 0) - row.get("papg", 0), 1),
-    } for row in summaries.values()]
-    team_rows.sort(key=lambda row: (row["power_score"] is None,
-                                    -(row["power_score"] or 0)))
-    for i, row in enumerate(team_rows, 1):
-        row["rank"] = i
+    team_rows = [
+        {
+            **row,
+            "power_score": _team_power(row),
+            "point_diff": round(row.get("ppg", 0) - row.get("papg", 0), 1),
+        }
+        for row in summaries.values()
+    ]
+    team_rows.sort(key=lambda row: (row["power_score"] is None, -(row["power_score"] or 0)))
+    for rank, row in enumerate(team_rows, 1):
+        row["rank"] = rank
 
     leaders: dict[str, list[dict]] = {"QB": [], "RB": [], "WR": [], "TE": []}
-    for pid, meta in idx.items():
-        pos = meta.get("position")
-        if pos not in leaders:
+    for player_id, meta in index.items():
+        position = meta.get("position")
+        if position not in leaders:
             continue
-        history = logs.get(pid, [])
+        history = logs.get(player_id, [])
         if len(history) < 3:
             continue
-        n = len(history)
-        if pos == "QB":
-            primary = sum(r["passing_yards"] for r in history) / n
-            secondary = sum(r["passing_tds"] for r in history) / n
+        games = len(history)
+        if position == "QB":
+            primary = sum(row["passing_yards"] for row in history) / games
+            secondary = sum(row["passing_tds"] for row in history) / games
             score = primary / 8 + secondary * 8
             metric = "Pass Yds/G"
-        elif pos == "RB":
-            primary = sum(r["rushing_yards"] + r["receiving_yards"] for r in history) / n
-            secondary = sum(r["carries"] + r["targets"] for r in history) / n
+        elif position == "RB":
+            primary = sum(row["rushing_yards"] + row["receiving_yards"] for row in history) / games
+            secondary = sum(row["carries"] + row["targets"] for row in history) / games
             score = primary / 3 + secondary
             metric = "Scrim Yds/G"
         else:
-            primary = sum(r["receiving_yards"] for r in history) / n
-            secondary = sum(r["targets"] for r in history) / n
+            primary = sum(row["receiving_yards"] for row in history) / games
+            secondary = sum(row["targets"] for row in history) / games
             score = primary / 2.5 + secondary * 1.5
             metric = "Rec Yds/G"
-        leaders[pos].append({
-            "playerId": pid, "player": meta["name"], "team": meta["team"],
-            "games": n, "primary": round(primary, 1), "usage": round(secondary, 1),
-            "score": round(score, 1), "metric": metric,
-            "evidenceSeason": ss,
-            "rosterVerified": bool(meta.get("rosterVerified")),
-        })
-    for pos, rows in leaders.items():
-        rows.sort(key=lambda x: x["score"], reverse=True)
-        leaders[pos] = rows[:12]
-        for i, row in enumerate(leaders[pos], 1):
-            row["rank"] = i
+        leaders[position].append(
+            {
+                "playerId": player_id,
+                "player": meta["name"],
+                "team": meta["team"],
+                "games": games,
+                "primary": round(primary, 1),
+                "usage": round(secondary, 1),
+                "score": round(score, 1),
+                "metric": metric,
+                "evidenceSeason": stats_season,
+                "rosterVerified": bool(meta.get("rosterVerified")),
+            }
+        )
+    for position, rows in leaders.items():
+        rows.sort(key=lambda row: row["score"], reverse=True)
+        leaders[position] = rows[:12]
+        for rank, row in enumerate(leaders[position], 1):
+            row["rank"] = rank
 
-    return jsonify({"season": season, "stats_season": ss,
-                    "teams": team_rows, "leaders": leaders})
+    return jsonify(
+        {"season": season, "stats_season": stats_season, "teams": team_rows, "leaders": leaders}
+    )
