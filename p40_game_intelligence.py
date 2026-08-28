@@ -17,6 +17,7 @@ from typing import Any
 from database import db
 from db_models import Team, TeamAdvancedSeasonStat, TeamSeasonStat
 import nfl_data
+from team_identity import normalize_team
 
 MODEL_NAME = "p4.0-game-intelligence"
 MODEL_VERSION = "p40-transparent-v1"
@@ -94,9 +95,10 @@ def build_team_profile(team_abbreviation: str, target_season: int) -> dict[str, 
     season reaches the configured game floor. This prevents preseason/Week 1
     records from being treated as mature evidence.
     """
-    team = db.session.scalar(
-        db.select(Team).where(Team.abbreviation == str(team_abbreviation).upper())
-    )
+    canonical = normalize_team(team_abbreviation)
+    if canonical is None:
+        return None
+    team = db.session.scalar(db.select(Team).where(Team.abbreviation == canonical))
     if team is None:
         return None
 
