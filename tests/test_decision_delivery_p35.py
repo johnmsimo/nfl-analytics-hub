@@ -52,6 +52,25 @@ def test_lean_or_better_is_delivered_before_price_value():
     assert payload["state"] == "ready"
     assert [row["player"] for row in payload["picks"]] == ["Strong", "Play", "Lean"]
     assert payload["summary"]["passes"] == 1
+    assert dd.verify_delivery_contract(payload)["gates"]["decision_ordering"] is True
+
+
+def test_grade_first_ordering_is_valid_even_when_later_grade_has_higher_score():
+    payload = dd.build_delivery(
+        [
+            _row("Play", 0.74, player="HigherScorePlay"),
+            _row("Strong Play", 0.63, player="StrongFirst"),
+            _row("Lean", 0.80, player="HighScoreLean"),
+        ],
+        limit=8,
+    )
+
+    assert [row["player"] for row in payload["picks"]] == [
+        "StrongFirst",
+        "HigherScorePlay",
+        "HighScoreLean",
+    ]
+    assert dd.verify_delivery_contract(payload)["ok"] is True
 
 
 def test_partial_state_is_explicit_when_some_games_fail():
