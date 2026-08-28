@@ -87,6 +87,12 @@ def main() -> int:
     summary = delivery.get("summary") or {}
     all_markets = list(delivery.get("allMarkets") or [])
     all_market_count = len(all_markets)
+    covered_game_ids = {
+        str(row.get("gameId"))
+        for row in all_markets
+        if row.get("gameId") is not None and str(row.get("gameId")).strip()
+    }
+    covered_game_count = len(covered_game_ids)
     game_count = int(summary.get("games") or 0)
     visible_count = int(summary.get("visibleOpportunities") or 0)
     delivery_state = str(delivery.get("state") or "")
@@ -120,10 +126,11 @@ def main() -> int:
         "scheduler_job_registered": scheduler_job_registered,
         "opportunity_contract_valid": audit.get("ok") is True,
         # A verifier must never require the model to manufacture a minimum number
-        # of picks. A legitimate slate can be all PASS. Instead, require real model
-        # market coverage and verify that a no-play state is represented truthfully.
-        "opportunity_board_has_model_market_coverage": game_count > 0
-        and all_market_count >= game_count,
+        # of picks. A legitimate slate can be all PASS. Instead, require every
+        # scheduled game to have model-market coverage and verify that a no-play
+        # state is represented truthfully.
+        "opportunity_board_has_full_game_coverage": game_count > 0
+        and covered_game_count == game_count,
         "opportunity_board_state_is_consistent": state_is_consistent,
         "stale_positive_play_requires_refresh": stale_item.get("opportunityState") == "REFRESH"
         and stale_item.get("actionable") is False
@@ -157,6 +164,7 @@ def main() -> int:
             "state": delivery.get("state"),
             "message": delivery.get("message"),
             "marketCount": all_market_count,
+            "coveredGameCount": covered_game_count,
             "summary": summary,
             "publication": delivery.get("publication"),
         },
