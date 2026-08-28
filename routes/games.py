@@ -1,10 +1,9 @@
 """
-Game routes: weekly slate, single-game detail, model-only P4.0 game decisions,
-lines/totals with de-vig fair probabilities, best-price EV and line shopping.
+Game routes: weekly slate, single-game detail, P4.0 model decisions, P4.1
+sportsbook actionability, and market-relative line boards.
 
-Market lines remain market-relative. P4.0 game intelligence is exposed through
-a separate model-only endpoint so model probability and sportsbook value are
-never conflated.
+P4.0 owns independent game probabilities. P4.1 joins those probabilities to
+verified sportsbook prices. Existing line-board routes remain market-relative.
 """
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ from flask import Blueprint, jsonify, request
 import nfl_data
 import odds_api
 import p40_game_intelligence
+import p41_game_market_pricing
 import value_engine as ve
 
 games_bp = Blueprint("games", __name__)
@@ -131,6 +131,33 @@ def api_game_decisions_week():
     if stype not in {"PRE", "REG", "POST"}:
         return jsonify({"error": "invalid season type"}), 400
     return jsonify(p40_game_intelligence.build_week_report(season, week, stype))
+
+
+@games_bp.route("/api/game-market-decisions/week")
+def api_game_market_decisions_week():
+    """P4.1 priced game decisions for moneyline, spread, and total markets.
+
+    pricing=cache is zero-credit, pricing=auto uses the normal provider TTL,
+    pricing=live explicitly force-refreshes one shared game-odds snapshot, and
+    pricing=off returns model decisions without sportsbook prices.
+    """
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    pricing = str(request.args.get("pricing", "auto")).lower()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    if pricing not in {"off", "cache", "auto", "live"}:
+        return jsonify({"error": "invalid pricing mode"}), 400
+    return jsonify(
+        p41_game_market_pricing.build_week_market_report(
+            season,
+            week,
+            stype,
+            pricing_mode=pricing,
+        )
+    )
 
 
 @games_bp.route("/api/game/<game_id>")
