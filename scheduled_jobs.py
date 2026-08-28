@@ -46,6 +46,7 @@ JOBS = {
     "cached-data-sync": {"name": "Cached data sync", "minutes": 60},
     "analytics-rebuild": {"name": "Warehouse aggregate rebuild", "minutes": 60},
     "quality-checks": {"name": "Data quality checks", "minutes": 60},
+    "game-decision-grading": {"name": "Game decision grading", "minutes": 30},
     "warehouse-retention": {
         "name": "Warehouse retention",
         "minutes": 1440,
@@ -217,6 +218,10 @@ def run_job(app, key):
                 rebuild_advanced_team_stats(None)
             elif key == "quality-checks":
                 run_quality_checks()
+            elif key == "game-decision-grading":
+                from p44_game_decision_ledger import grade_pending
+
+                grade_pending()
             elif key == "warehouse-retention":
                 from warehouse_retention import apply_warehouse_retention
 
