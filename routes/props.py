@@ -80,7 +80,14 @@ def _load_prop_quotes(
     event_id = str(event["id"])
     event_odds = odds_api.peek_event_props(event_id) if cache_only_odds else odds_api.get_event_props(event_id)
     snapshot = odds_api.event_props_snapshot(event_id)
-    for row in odds_api.parse_prop_markets(event_odds, fetched_at=snapshot.get("fetched_at")):
+    fetched_at = snapshot.get("fetched_at")
+    # Normal get_event_props() persists fetched_at before returning. Preserve
+    # compatibility with live provider wrappers/test doubles that return a
+    # response but omit the snapshot side effect. Cache-only paths never use
+    # this fallback, so missing cached provenance still fails closed as stale.
+    if not cache_only_odds and event_odds is not None and fetched_at is None:
+        fetched_at = time.time()
+    for row in odds_api.parse_prop_markets(event_odds, fetched_at=fetched_at):
         market = pj.ODDS_KEY_TO_MARKET.get(row["base_key"])
         if market and isinstance(row.get("line"), (int, float)):
             odds_rows.setdefault((_norm_name(row["player"]), market, row["line"]), []).append(row)
