@@ -2,7 +2,7 @@
 Game routes: weekly slate, single-game detail, P4.0 model decisions, P4.1
 sportsbook actionability, P4.2 durable hydrated market board, P4.3 decision-first
 delivery, P4.4 immutable game-publication receipts, P4.5 smart market freshness,
-and market-relative boards.
+P4.6 bankroll-aware portfolio allocation, and market-relative boards.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import p42_live_market_hydration
 import p43_game_decision_delivery
 import p44_game_decision_ledger
 import p45_smart_market_refresh
+import p46_game_portfolio
 import value_engine as ve
 
 games_bp = Blueprint("games", __name__)
@@ -190,6 +191,18 @@ def api_game_opportunities_week():
     if stype not in {"PRE", "REG", "POST"}:
         return jsonify({"error": "invalid season type"}), 400
     return jsonify(p45_smart_market_refresh.build_week_opportunities(season, week, stype))
+
+
+@games_bp.route("/api/game-portfolio/week")
+def api_game_portfolio_week():
+    """P4.6 cache-only bankroll portfolio; advisory stakes only."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(p46_game_portfolio.build_week_portfolio(season, week, stype))
 
 
 @games_bp.route("/api/game-market-refresh/status")
