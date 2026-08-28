@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from flask import Blueprint, jsonify, request
 
+import decision_intelligence as di
 import nfl_data
 import player_intelligence as pi
 import projection_data as pd
@@ -103,6 +104,15 @@ def api_analytics():
             )
             if not intelligence or intelligence.get("probOver") is None:
                 continue
+            prob_over = float(intelligence["probOver"])
+            side = "over" if prob_over >= 0.5 else "under"
+            decision = di.build_prop_decision(
+                intelligence,
+                side=side,
+                line=float(line),
+                simulations=800,
+                seed=di.stable_seed(season, player_id, market, line, "analytics"),
+            )
             market_rows.append(
                 {
                     "playerId": player_id,
@@ -116,6 +126,7 @@ def api_analytics():
                     "line": line,
                     "rawProbOver": intelligence["rawProbOver"],
                     "probOver": intelligence["probOver"],
+                    "side": side,
                     "opponent": opponent,
                     "matchupGrade": intelligence["matchup"]["grade"],
                     "matchupFactor": intelligence["matchup"]["factor"],
@@ -123,13 +134,22 @@ def api_analytics():
                     "confidenceGrade": intelligence["confidence"]["grade"],
                     "riskFlags": intelligence["riskFlags"],
                     "signal": intelligence["signalStrength"],
-                    "rankScore": pi.ranking_score(intelligence),
+                    "modelRankScore": pi.ranking_score(intelligence),
+                    "rankScore": decision["decisionScore"],
+                    "decisionGrade": decision["decisionGrade"],
+                    "decisionScore": decision["decisionScore"],
+                    "consensusProb": decision["consensusProbability"],
+                    "simulationProb": decision["simulationProbability"],
+                    "simulationAgreement": decision["simulationAgreement"],
+                    "recommendedAction": decision["recommendedAction"],
+                    "decisionReasons": decision["decisionReasons"],
+                    "decisionRisks": decision["decisionRisks"],
                     "evidenceSeason": stats_season,
                     "rosterVerified": bool(meta.get("rosterVerified")),
-                    "modelVersion": intelligence["modelVersion"],
+                    "modelVersion": decision["modelVersion"],
                 }
             )
-    market_rows.sort(key=lambda row: row["rankScore"], reverse=True)
+    market_rows.sort(key=lambda row: row["decisionScore"], reverse=True)
 
     total_games = sum(team["games"] for team in teams)
     avg_points = round(sum(team["ppg"] for team in teams) / max(len(teams), 1), 1)
@@ -138,7 +158,7 @@ def api_analytics():
         {
             "season": season,
             "stats_season": stats_season,
-            "model_version": "p3.3-evidence-calibrated",
+            "model_version": "p3.4-simulation-decision",
             "kpis": {
                 "teams": len(teams),
                 "player_pool": len(index),
@@ -146,6 +166,12 @@ def api_analytics():
                 "avg_points": avg_points,
                 "avg_abs_diff": avg_diff,
                 "projection_signals": len(market_rows),
+                "lean_or_better": sum(
+                    1 for row in market_rows if row["decisionGrade"] in {"Strong Play", "Play", "Lean"}
+                ),
+                "play_or_better": sum(
+                    1 for row in market_rows if row["decisionGrade"] in {"Strong Play", "Play"}
+                ),
             },
             "team_efficiency": teams,
             "top_signals": market_rows[:20],
@@ -154,10 +180,11 @@ def api_analytics():
                 for position, players in sorted(position_counts.items())
             ],
             "methodology": (
-                "P3.3 uses normalized warehouse histories plus the current roster, "
-                "distribution-based projections, defense-vs-position matchup context, "
-                "uncertainty bands, and evidence-aware probability shrinkage. Confidence "
-                "measures evidence quality and stability; it is not a guarantee of outcome."
+                "P3.4 keeps P3.3's normalized warehouse projections and evidence-aware "
+                "calibration, then samples each projection distribution with deterministic "
+                "Monte Carlo to confirm tail behavior and assign one model decision grade. "
+                "Price/EV remains a separate actionability layer; simulation is a confirmation "
+                "of the same model distribution, not an independent model vote."
             ),
         }
     )
