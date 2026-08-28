@@ -1,9 +1,11 @@
 """
 The Odds API layer for NFL (americanfootball_nfl).
 
-Ported pattern from the MLB hub: one persisted snapshot survives redeploys so
-normal product traffic does not repeatedly spend provider credits. P3.6 adds
-cache-only reads plus quote provenance/timestamps so stale prices can be shown
+P3.6 uses a database-backed provider snapshot so game-event and player-prop
+cache data survives Fly deploys, restarts, and machine replacement. The legacy
+JSON file remains a development/fallback mirror only.
+
+Cache-only reads plus quote provenance/timestamps allow stale prices to be shown
 for context but never promoted into actionable bets.
 
 Degrades gracefully: the API key, canonical provider registration, and explicit
@@ -19,6 +21,7 @@ from datetime import UTC, datetime
 
 import http_client
 import nfl_data
+import provider_cache_store
 
 API_BASE = "https://api.the-odds-api.com/v4"
 SPORT = "americanfootball_nfl"
@@ -83,27 +86,55 @@ def _today() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
+def _load_file_snapshot() -> dict:
+    try:
+        with open(_CACHE_FILE, "r", encoding="utf-8") as file:
+            value = json.load(file)
+    except Exception:  # noqa: BLE001 - local mirror is optional
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _save_file_snapshot(snapshot: dict) -> None:
+    """Best-effort local mirror for development and emergency fallback."""
+    try:
+        os.makedirs(os.path.dirname(_CACHE_FILE), exist_ok=True)
+        tmp = _CACHE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as file:
+            json.dump(snapshot, file, separators=(",", ":"))
+        os.replace(tmp, _CACHE_FILE)
+    except Exception:  # noqa: BLE001 - database remains canonical in production
+        pass
+
+
 def _load_snapshot() -> dict:
+    """Load the provider snapshot, preferring durable database storage."""
     global _snapshot
     with _lock:
         if _snapshot is not None:
             return _snapshot
-        try:
-            with open(_CACHE_FILE, "r", encoding="utf-8") as file:
-                _snapshot = json.load(file)
-        except Exception:  # noqa: BLE001
-            _snapshot = {}
-        if not isinstance(_snapshot, dict):
-            _snapshot = {}
+
+        durable = provider_cache_store.load_snapshot(PROVIDER_KEY)
+        if durable:
+            _snapshot = durable
+            _save_file_snapshot(_snapshot)
+            return _snapshot
+
+        # Development/upgrade fallback: recover an existing local file and
+        # immediately bootstrap it into the durable store when DB access exists.
+        _snapshot = _load_file_snapshot()
+        if _snapshot:
+            provider_cache_store.save_snapshot(PROVIDER_KEY, _snapshot)
         return _snapshot
 
 
 def _save_snapshot() -> None:
+    """Persist the canonical snapshot to PostgreSQL and mirror it locally."""
     with _lock:
-        tmp = _CACHE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as file:
-            json.dump(_snapshot, file, separators=(",", ":"))
-        os.replace(tmp, _CACHE_FILE)
+        snapshot = _snapshot if isinstance(_snapshot, dict) else {}
+        if snapshot:
+            provider_cache_store.save_snapshot(PROVIDER_KEY, snapshot)
+        _save_file_snapshot(snapshot)
 
 
 def _get(path: str, **params):
@@ -450,4 +481,5 @@ def snapshot_status() -> dict:
         "event_props_cached": len(event_cells),
         "freshest_event_props_age_seconds": min(event_ages) if event_ages else None,
         "oldest_event_props_age_seconds": max(event_ages) if event_ages else None,
+        "cache_persistence": provider_cache_store.cache_status(PROVIDER_KEY),
     }

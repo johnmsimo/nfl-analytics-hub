@@ -89,8 +89,9 @@ def _should_create_schema() -> bool:
 
 def init_database(app: Flask) -> None:
     with app.app_context():
-        # Import model metadata for Flask-Migrate and local schema creation.
+        # Import all table metadata for Flask-Migrate and local schema creation.
         import db_models  # noqa: F401, PLC0415
+        import provider_cache_store  # noqa: F401, PLC0415
 
         if _should_create_schema():
             db.create_all()
