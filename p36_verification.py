@@ -29,8 +29,19 @@ def _priced_game_ids(rows: list[dict[str, Any]]) -> set[str]:
     }
 
 
-def _select_refresh_target(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Prefer a model pick from a game already known to produce price rows."""
+def _select_refresh_target(
+    rows: list[dict[str, Any]],
+    payload_diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Choose one refresh target using the strongest available pricing evidence.
+
+    Prefer a game that already produces non-expired price rows. When every
+    cached quote has aged past the display window, ``pricedRows`` becomes zero
+    even though the persisted provider payload may still prove that a game has
+    rich, parseable, player/market-overlapping prop coverage. In that state,
+    use the cache-only provider diagnostics to choose the broadest known
+    matchable game instead of falling back to an arbitrary model pick.
+    """
     priced_games = _priced_game_ids(rows)
     delivery = dd.build_delivery(rows, limit=max(len(rows), 100))
     for row in delivery.get("picks") or []:
@@ -40,6 +51,7 @@ def _select_refresh_target(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "gameId": game_id,
                 "reason": "ranked_pick_with_known_pricing",
                 "knownPricedGames": len(priced_games),
+                "matchableProviderGames": 0,
             }
 
     for row in rows:
@@ -49,12 +61,67 @@ def _select_refresh_target(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "gameId": game_id,
                 "reason": "known_priced_game_fallback",
                 "knownPricedGames": len(priced_games),
+                "matchableProviderGames": 0,
             }
+
+    details = (
+        payload_diagnostics.get("details")
+        if isinstance(payload_diagnostics, dict)
+        else None
+    )
+    candidates: list[dict[str, Any]] = []
+    for detail in details or []:
+        if not isinstance(detail, dict):
+            continue
+        game_id = str(detail.get("gameId") or "")
+        pairs = int(detail.get("matchablePlayerMarketPairs") or 0)
+        usable = int(detail.get("usableQuoteRows") or 0)
+        if not game_id or pairs <= 0 or usable <= 0:
+            continue
+        market_breadth = len(detail.get("marketOverlap") or [])
+        candidates.append(
+            {
+                "gameId": game_id,
+                "pairs": pairs,
+                "usable": usable,
+                "bookmakers": int(detail.get("bookmakers") or 0),
+                "marketBreadth": market_breadth,
+                "snapshotAgeSeconds": detail.get("snapshotAgeSeconds"),
+            }
+        )
+
+    if candidates:
+        # Broad market coverage comes first because a game with only anytime-TD
+        # offers can be technically matchable while still failing to price the
+        # selected model side. Pair count, book count, and quote-row volume then
+        # maximize the odds that one controlled refresh yields multiple usable
+        # model prices.
+        best = max(
+            candidates,
+            key=lambda item: (
+                int(item["marketBreadth"]),
+                int(item["pairs"]),
+                int(item["bookmakers"]),
+                int(item["usable"]),
+            ),
+        )
+        return {
+            "gameId": best["gameId"],
+            "reason": "matchable_provider_quote_overlap",
+            "knownPricedGames": 0,
+            "matchableProviderGames": len(candidates),
+            "providerMarketBreadth": best["marketBreadth"],
+            "providerMatchablePlayerMarketPairs": best["pairs"],
+            "providerBookmakers": best["bookmakers"],
+            "providerUsableQuoteRows": best["usable"],
+            "cachedSnapshotAgeSeconds": best["snapshotAgeSeconds"],
+        }
 
     return {
         "gameId": _unique_target_game(rows),
-        "reason": "model_pick_fallback_no_known_pricing",
+        "reason": "model_pick_fallback_no_provider_pricing_evidence",
         "knownPricedGames": 0,
+        "matchableProviderGames": 0,
     }
 
 
@@ -232,6 +299,12 @@ def _provider_payload_diagnostics(
     with_matchable_quotes = [
         item for item in snapshots if int(item.get("matchablePlayerMarketPairs") or 0) > 0
     ]
+    expired_matchable = [
+        item
+        for item in with_matchable_quotes
+        if isinstance(item.get("snapshotAgeSeconds"), (int, float))
+        and float(item["snapshotAgeSeconds"]) > mp.DISPLAY_MAX_AGE_SECONDS
+    ]
 
     if not snapshots:
         classification = "no_cached_prop_snapshots"
@@ -251,6 +324,7 @@ def _provider_payload_diagnostics(
         "gamesWithBookmakers": len(with_bookmakers),
         "gamesWithUsableQuotes": len(with_usable_quotes),
         "gamesWithMatchableQuotes": len(with_matchable_quotes),
+        "expiredMatchableGames": len(expired_matchable),
         "details": details,
     }
 
@@ -344,7 +418,7 @@ def readiness_snapshot(
     )
 
     if refresh:
-        target = _select_refresh_target(cached_rows)
+        target = _select_refresh_target(cached_rows, payload_diagnostics)
         target_game_id = target.get("gameId")
         games = {
             str(game["game_id"]): game
@@ -432,11 +506,19 @@ def readiness_snapshot(
             and isinstance(refresh_result.get("providerPayload"), dict)
             and int(refresh_result["providerPayload"].get("usableQuoteRows") or 0) > 0
         )
+        target_has_provider_evidence = bool(
+            refresh_result
+            and (
+                int(refresh_result.get("knownPricedGames") or 0) > 0
+                or int(refresh_result.get("matchableProviderGames") or 0) > 0
+            )
+        )
         gates["explicit_refresh_succeeded"] = bool(refresh_result and refresh_result.get("ok"))
         gates["explicit_refresh_returned_usable_props"] = payload_ok
-        gates["refresh_target_known_priced"] = bool(
-            refresh_result and int(refresh_result.get("knownPricedGames") or 0) > 0
-        )
+        gates["refresh_target_provider_evidence"] = target_has_provider_evidence
+        # Keep the historical gate key for compatibility while expanding its
+        # semantics to cover expired-but-proven provider pricing evidence.
+        gates["refresh_target_known_priced"] = target_has_provider_evidence
 
     return {
         "phase": "P3.6",
