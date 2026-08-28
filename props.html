@@ -13,9 +13,8 @@
 .addbtn{background:var(--volt-dim);border:1px solid var(--b-strong);color:var(--volt);border-radius:8px;font-weight:800;font-size:12px;padding:5px 11px;min-height:30px}
 .addbtn:hover{background:rgba(184,236,61,.22)}
 .addbtn.in{background:var(--card3);border-color:var(--line);color:var(--mu)}
-.pname{font-weight:700}
-.pname:hover{color:var(--volt)}
-.psub{color:var(--mu);font-size:11px}
+.pname{font-weight:700}.pname:hover{color:var(--volt)}
+.psub{color:var(--mu);font-size:11px}.intel{font-size:10px;margin-top:2px}.intel.high{color:var(--g)}.intel.medium{color:var(--volt)}.intel.guarded,.intel.low{color:var(--warn)}
 @media(max-width:430px){#controls{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}#controls select{min-width:0;width:100%}#fmkt,#fpos{flex:1;min-width:0}#fq{order:3;flex-basis:100%!important;max-width:none!important;width:100%}#meta{order:4;width:100%}}
 </style>
 </head>
@@ -39,9 +38,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#fmkt').innerHTML = '<option value="">All markets</option>' +
     Object.entries(LABELS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
 
-  let all = [], sortKey = 'edge', sortDir = -1, lastW = null;
+  let all = [], sortKey = 'rankScore', sortDir = -1, lastW = null;
   const skeleton = () => $('#tbl tbody').innerHTML =
-    Array.from({length:8},()=>'<tr><td colspan="12" style="padding:4px 8px"><div class="skel" style="height:34px"></div></td></tr>').join('');
+    Array.from({length:8},()=>'<tr><td colspan="14" style="padding:4px 8px"><div class="skel" style="height:34px"></div></td></tr>').join('');
 
   await weekControls($('#controls'), load);
   ['fmkt','fpos'].forEach(id => $('#'+id).onchange = render);
@@ -57,7 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     all = d.rows || [];
-    $('#meta').textContent = `${all.length} props · ${d.games} games` + (d.odds_configured ? '' : ' · odds offline (model lines*)');
+    $('#meta').textContent = `${all.length} props · ${d.games} games · P3.3 ranked` + (d.odds_configured ? '' : ' · odds offline (model lines*)');
     render();
   }
 
@@ -70,20 +69,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (x==null&&y==null) return 0; if (x==null) return 1; if (y==null) return -1;
       return x<y ? sortDir : x>y ? -sortDir : 0; });
     const H = (k,l,cls='') => `<th class="sortable ${cls}" data-k="${k}">${l}${sortKey===k?(sortDir<0?' ↓':' ↑'):''}</th>`;
-    let h = '<thead><tr>' + H('player','Player') + H('marketKey','Market') + H('line','Line','num') +
-      H('modelMean','Proj','num') + H('probOver','P(O)','num') + '<th>Pick</th>' +
+    let h = '<thead><tr>' + H('rankScore','Score','num') + H('player','Player') + H('marketKey','Market') + H('line','Line','num') +
+      H('modelMean','Proj','num') + H('probOver','P(O)','num') + H('confidenceScore','Conf','num') + '<th>Pick</th>' +
       '<th class="num">Best</th>' + H('edge','Edge','num') + H('evPct','EV','num hide-sm') +
       H('kellyPct','Kelly','num hide-sm') + H('grade','Gr') + '<th></th></tr></thead><tbody>';
     for (const r of rows.slice(0, 400)) {
       const best = r.side === 'over' ? r.bestOver : r.bestUnder;
       const gcls = (r.grade || '').replace('+','p');
+      const range = r.projectionRange || {};
+      const risks = (r.riskFlags || []).length ? ` · ${r.riskFlags.join(', ')}` : '';
       h += `<tr>
+        <td class="num"><b>${r.rankScore!=null?(r.rankScore*100).toFixed(0):'—'}</b></td>
         <td><div class="pcell">${headshot(r.playerId)}<div><a class="pname" href="/player/${esc(r.playerId)}?season=${r.season}">${esc(r.player)}</a>
-            <div class="psub">${teamLogo(r.team)} ${r.team} ${r.position} vs ${r.opponent}</div></div></div></td>
+            <div class="psub">${teamLogo(r.team)} ${r.team} ${r.position} vs ${r.opponent}</div>
+            <div class="intel ${esc(r.confidenceGrade||'')}">${esc((r.confidenceGrade||'').toUpperCase())} · ${esc(r.matchupGrade||'neutral')} matchup · P10–P90 ${range.p10??'—'}–${range.p90??'—'}${esc(risks)}</div></div></div></td>
         <td>${esc(r.marketLabel)}</td>
         <td class="num">${r.line}${r.noOdds ? '<span class="muted">*</span>' : ''}</td>
         <td class="num">${r.modelMean}</td>
         <td class="num">${(r.probOver*100).toFixed(0)}%</td>
+        <td class="num">${r.confidenceScore!=null?(r.confidenceScore*100).toFixed(0)+'%':'—'}</td>
         <td><span class="tag ${r.side==='over'?'over':'under'}">${r.marketKey==='anytime_td'?(r.side==='over'?'YES':'NO'):r.side}</span></td>
         <td class="num">${best ? `${am(best.price)} <span class="muted">${esc(best.book)}</span>` : '—'}</td>
         <td class="num ${r.edge>0?'pos':r.edge<0?'neg':''}">${r.edge!=null?(r.edge*100).toFixed(1)+'%':'—'}</td>
@@ -116,6 +120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       book: best ? best.book : null, modelProb: r.modelProb,
       impliedProb: r.impliedProb, fairProb: r.fairProb, edge: r.edge,
       evPct: r.evPct, kellyPct: r.kellyPct, modelSource: r.modelSource,
+      confidenceScore: r.confidenceScore, rankScore: r.rankScore,
     });
     btn.textContent = '✓ In slip'; btn.classList.add('in');
   }
