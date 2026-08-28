@@ -66,6 +66,15 @@ def test_p43_preserves_unpriced_model_moneyline_without_inventing_price():
     assert row["modelOnlyFallback"] is True
 
 
+def test_single_game_delivery_labels_unpriced_fallback_model_only():
+    delivery = p43.build_delivery_from_board(_unpriced_board())
+    game = p43.game_delivery(delivery, "g1")
+    assert game["state"] == "model-only"
+    assert len(game["markets"]) == 1
+    assert game["markets"][0]["quoteStatus"] == "unpriced"
+    assert game["picks"] == []
+
+
 def test_p45_turns_unpriced_play_into_visible_model_opportunity():
     delivery = p43.build_delivery_from_board(_unpriced_board())
     out = p45.enrich_delivery(delivery)
