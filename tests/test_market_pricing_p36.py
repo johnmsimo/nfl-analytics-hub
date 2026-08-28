@@ -5,6 +5,7 @@ from pathlib import Path
 
 import market_pricing as mp
 import odds_api
+import p36_verification as p36
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -157,3 +158,63 @@ def test_p36_workflow_makes_credit_spend_explicit_and_keeps_cache_only_option():
     assert "P36_REFRESH_MODE=$MODE" in workflow
     assert "/app/scripts/p36_market_pricing_verification.py" in workflow
     assert "/app/scripts/p2_exit_verification.py" in workflow
+
+
+def test_verification_period_falls_forward_when_current_period_is_not_in_provider_catalog(monkeypatch):
+    schedule = [
+        {"game_id": "pre-1", "season_type": "PRE", "week": 3},
+        {"game_id": "reg-1", "season_type": "REG", "week": 1},
+        {"game_id": "reg-2", "season_type": "REG", "week": 1},
+    ]
+    monkeypatch.setattr(
+        p36.nfl_data,
+        "current_week",
+        lambda season: {"season": season, "week": 3, "season_type": "PRE"},
+    )
+    monkeypatch.setattr(p36.nfl_data, "get_schedule", lambda season: schedule)
+    monkeypatch.setattr(p36.odds_api, "peek_game_odds", lambda: [{"id": "evt-reg"}])
+    monkeypatch.setattr(
+        p36.odds_api,
+        "find_event_for_game",
+        lambda game, cache_only=False: {"id": "evt-reg"}
+        if game["season_type"] == "REG"
+        else None,
+    )
+
+    selected = p36._select_verification_period(2026)
+
+    assert selected["seasonType"] == "REG"
+    assert selected["week"] == 1
+    assert selected["reason"] == "provider_catalog_fallback"
+    assert selected["currentSeasonType"] == "PRE"
+    assert selected["currentWeek"] == 3
+    assert selected["providerMatchedGames"] == 2
+    assert selected["cachedProviderEvents"] == 1
+
+
+def test_verification_period_keeps_current_period_when_provider_matches(monkeypatch):
+    schedule = [
+        {"game_id": "pre-1", "season_type": "PRE", "week": 3},
+        {"game_id": "reg-1", "season_type": "REG", "week": 1},
+    ]
+    monkeypatch.setattr(
+        p36.nfl_data,
+        "current_week",
+        lambda season: {"season": season, "week": 3, "season_type": "PRE"},
+    )
+    monkeypatch.setattr(p36.nfl_data, "get_schedule", lambda season: schedule)
+    monkeypatch.setattr(p36.odds_api, "peek_game_odds", lambda: [{"id": "evt-pre"}])
+    monkeypatch.setattr(
+        p36.odds_api,
+        "find_event_for_game",
+        lambda game, cache_only=False: {"id": "evt-pre"}
+        if game["game_id"] == "pre-1"
+        else None,
+    )
+
+    selected = p36._select_verification_period(2026)
+
+    assert selected["seasonType"] == "PRE"
+    assert selected["week"] == 3
+    assert selected["reason"] == "current_period_provider_match"
+    assert selected["providerMatchedGames"] == 1

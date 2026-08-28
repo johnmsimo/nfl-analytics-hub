@@ -20,6 +20,73 @@ def _unique_target_game(rows: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _select_verification_period(target_season: int) -> dict[str, Any]:
+    """Choose the earliest current-or-future period represented by provider cache.
+
+    The app schedule can be in preseason while The Odds API game catalog has
+    already rolled forward to regular season. A production pricing verifier must
+    not spend a refresh on a period the provider cannot identify. This selector
+    uses cache-only event matching and therefore consumes zero provider credits.
+    """
+    current = nfl_data.current_week(target_season)
+    current_week = int(current["week"])
+    current_type = str(current.get("season_type") or "REG")
+    current_key = (current_type, current_week)
+    schedule = nfl_data.get_schedule(target_season)
+
+    periods: list[tuple[str, int]] = []
+    for game in schedule:
+        season_type = str(game.get("season_type") or "")
+        week = game.get("week")
+        if not season_type or not isinstance(week, int):
+            continue
+        key = (season_type, week)
+        if key not in periods:
+            periods.append(key)
+
+    try:
+        start_index = periods.index(current_key)
+    except ValueError:
+        start_index = 0
+
+    cached_provider_events = len(odds_api.peek_game_odds())
+    for season_type, week in periods[start_index:]:
+        games = [
+            game
+            for game in schedule
+            if game.get("season_type") == season_type and game.get("week") == week
+        ]
+        matched = sum(
+            1
+            for game in games
+            if odds_api.find_event_for_game(game, cache_only=True) is not None
+        )
+        if matched:
+            return {
+                "week": week,
+                "seasonType": season_type,
+                "reason": (
+                    "current_period_provider_match"
+                    if (season_type, week) == current_key
+                    else "provider_catalog_fallback"
+                ),
+                "currentWeek": current_week,
+                "currentSeasonType": current_type,
+                "providerMatchedGames": matched,
+                "cachedProviderEvents": cached_provider_events,
+            }
+
+    return {
+        "week": current_week,
+        "seasonType": current_type,
+        "reason": "no_provider_catalog_match",
+        "currentWeek": current_week,
+        "currentSeasonType": current_type,
+        "providerMatchedGames": 0,
+        "cachedProviderEvents": cached_provider_events,
+    }
+
+
 def readiness_snapshot(
     target_season: int = 2026,
     *,
@@ -32,9 +99,9 @@ def readiness_snapshot(
     after that targeted refresh is cache-only.
     """
     started = time.monotonic()
-    current = nfl_data.current_week(target_season)
-    week = int(current["week"])
-    season_type = str(current.get("season_type") or "REG")
+    period = _select_verification_period(target_season)
+    week = int(period["week"])
+    season_type = str(period["seasonType"])
     refresh = str(refresh_mode).lower() == "one-event"
     refresh_result = None
 
@@ -98,6 +165,7 @@ def readiness_snapshot(
     gates = {
         **contract["gates"],
         "provider_configured": bool(provider.get("configured")),
+        "provider_period_match": int(period.get("providerMatchedGames") or 0) > 0,
         "decision_volume": len(rows) >= thresholds["minimumDecisionRows"],
         "priced_row_pool": len(priced) >= thresholds["minimumPricedRows"],
         "fresh_row_pool": len(fresh) >= thresholds["minimumFreshRows"],
@@ -114,6 +182,7 @@ def readiness_snapshot(
         "targetSeason": target_season,
         "week": week,
         "seasonType": season_type,
+        "periodSelection": period,
         "games": game_count,
         "buildSeconds": build_seconds,
         "provider": provider,
