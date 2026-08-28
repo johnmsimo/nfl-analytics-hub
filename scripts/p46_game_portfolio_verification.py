@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from database import db
+import nfl_data
 import p45_smart_market_refresh as p45
 import p46_game_portfolio as p46
 
@@ -54,8 +55,9 @@ def _synthetic_board() -> dict:
 def main() -> int:
     from app import app
 
+    verification_season = int(nfl_data.default_season())
     with app.app_context():
-        refresh = p45.refresh_status(2026)
+        refresh = p45.refresh_status(verification_season)
         slate = refresh.get("slate") or {}
         target_ok = (
             refresh.get("available") is True
@@ -114,7 +116,7 @@ def main() -> int:
     )
     gates = {
         "next_slate_available": target_ok,
-        "next_slate_identity_valid": target_season == 2026
+        "next_slate_identity_valid": target_season == verification_season
         and target_type in {"PRE", "REG", "POST"}
         and valid_week,
         "production_portfolio_matches_next_slate": production.get("season") == target_season
