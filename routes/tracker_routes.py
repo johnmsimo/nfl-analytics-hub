@@ -42,7 +42,20 @@ def api_add_pick():
         return jsonify({"error": "invalid side"}), 400
     if "stakeDollars" in payload:
         payload["stakeDollars"] = bounded_number(payload, "stakeDollars", 0, 1_000_000)
-    return jsonify(tracker.add_pick(payload))
+    entry = tracker.add_pick(payload)
+    # Confirming a model pick is its publication boundary for P3.7. The ledger
+    # ignores non-model/manual rows and never rewrites an existing release key.
+    decision_ledger.record_delivery(
+        [entry],
+        context={
+            "source": "tracker_confirmed_pick",
+            "season": entry.get("season"),
+            "week": entry.get("week"),
+            "season_type": payload.get("seasonType") or payload.get("type"),
+            "modelVersion": entry.get("modelSource"),
+        },
+    )
+    return jsonify(entry)
 
 
 @tracker_bp.route("/api/tracker/picks")
