@@ -60,9 +60,28 @@ def _as_utc(value: Any) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def provider_update_timestamp(row: dict[str, Any]) -> datetime | None:
+    """Return the provider's most specific last-change timestamp for audit context."""
+    for key in ("market_last_update", "book_last_update", "quote_at"):
+        parsed = _as_utc(row.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def quote_timestamp(row: dict[str, Any]) -> datetime | None:
-    """Use the provider's most specific update timestamp, then fetch time."""
-    for key in ("market_last_update", "book_last_update", "quote_at", "fetched_at"):
+    """Return when this quote was actually observed by our provider snapshot.
+
+    Actionability freshness is about how recently we verified the currently
+    returned quote, not how recently the sportsbook changed the number. A line
+    can remain unchanged for an hour and still be a current quote if it was
+    fetched seconds ago. Provider update timestamps remain available separately
+    through :func:`provider_update_timestamp` for audit/context.
+
+    Rows created by older integrations may not carry ``fetched_at``; those fall
+    back to their provider timestamp and therefore still fail closed as they age.
+    """
+    for key in ("fetched_at", "quote_at", "market_last_update", "book_last_update"):
         parsed = _as_utc(row.get(key))
         if parsed is not None:
             return parsed
@@ -89,22 +108,28 @@ def quote_freshness(row: dict[str, Any], now: datetime | None = None) -> str:
 
 
 def _quote_view(row: dict[str, Any], now: datetime) -> dict[str, Any]:
-    timestamp = quote_timestamp(row)
+    observed_at = quote_timestamp(row)
+    provider_updated_at = provider_update_timestamp(row)
     age = quote_age_seconds(row, now)
     freshness = quote_freshness(row, now)
     expires_at = None
     expires_in = None
-    if timestamp is not None:
-        expires_at = (timestamp + timedelta(seconds=ACTIONABLE_MAX_AGE_SECONDS)).isoformat()
+    if observed_at is not None:
+        expires_at = (observed_at + timedelta(seconds=ACTIONABLE_MAX_AGE_SECONDS)).isoformat()
         expires_in = round(ACTIONABLE_MAX_AGE_SECONDS - (age or 0.0), 1)
+    provider_update_age = None
+    if provider_updated_at is not None:
+        provider_update_age = round(max(0.0, (now - provider_updated_at).total_seconds()), 1)
     return {
         "book": row.get("book"),
         "bookKey": row.get("book_key"),
         "price": row.get("price"),
         "line": row.get("line"),
-        "quoteAt": timestamp.isoformat() if timestamp is not None else None,
+        "quoteAt": observed_at.isoformat() if observed_at is not None else None,
         "quoteAgeSeconds": age,
         "quoteFreshness": freshness,
+        "providerUpdatedAt": provider_updated_at.isoformat() if provider_updated_at else None,
+        "providerUpdateAgeSeconds": provider_update_age,
         "expiresAt": expires_at,
         "expiresInSeconds": expires_in,
     }
@@ -118,7 +143,7 @@ def _best(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 def _fair_probabilities(rows: list[dict[str, Any]], side: str, now: datetime) -> list[float]:
-    """Same-book, same-line de-vig probabilities using only fresh two-way quotes."""
+    """Same-book, same-line de-vig probabilities using only fresh observations."""
     by_book: dict[str, dict[str, dict[str, Any]]] = {}
     for row in rows:
         if quote_freshness(row, now) != "fresh":
