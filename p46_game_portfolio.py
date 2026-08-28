@@ -20,6 +20,7 @@ from typing import Any
 
 import p45_smart_market_refresh as p45
 import tracker
+import value_engine as ve
 
 MODEL_NAME = "p4.6-game-portfolio"
 MODEL_VERSION = "p46-bankroll-portfolio-v1"
@@ -108,7 +109,11 @@ def _settings(raw: dict[str, Any] | None = None) -> dict[str, float]:
 
 
 def _requested_stake_pct(item: dict[str, Any], settings: dict[str, float], active: dict[str, Any]) -> float:
-    full_kelly = max(0.0, _number(item.get("kellyPct"), 0.0) or 0.0)
+    # P4.1 exposes ``kellyPct`` after its own quarter-Kelly + 5% display cap.
+    # P4.6 must start from *full* Kelly so the user's configured Kelly fraction
+    # and max-bet cap are applied exactly once and can exceed P4.1's display cap.
+    probability = _number(item.get("modelProbability"), 0.0) or 0.0
+    full_kelly = ve.kelly_fraction(probability, item.get("bestPrice"))
     grade = str(item.get("decisionGrade") or "Pass")
     multiplier = float(active["strongPlayMultiplier"] if grade == "Strong Play" else active["playMultiplier"])
     requested = full_kelly * float(settings["kellyFraction"]) * multiplier
