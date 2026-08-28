@@ -1,7 +1,7 @@
 """
 Tracker API: persistent pick CRUD, CLV/performance, publication ledger,
-outcome-learning diagnostics, automatic grading, closing capture, and bankroll
-settings.
+outcome-learning diagnostics, calibration challenger governance, automatic
+grading, closing capture, and bankroll settings.
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, request
 
 import decision_ledger
 import p38_learning
+import p39_calibration
 import tracker
 from security import bounded_number, json_body, limiter
 
@@ -18,9 +19,6 @@ tracker_bp = Blueprint("tracker", __name__)
 @tracker_bp.route("/api/tracker/pick", methods=["POST"])
 @limiter.limit(30, 60, key="user")
 def api_add_pick():
-    # Must accept the full P3.4-P3.6 decision row posted by the shared slip.
-    # P3.7 snapshots these fields at first save and never rewrites the release
-    # receipt on duplicate saves.
     allowed = {
         "gameId", "season", "week", "gameday", "playerId", "player", "team",
         "opponent", "position", "marketKey", "marketLabel", "line", "side",
@@ -32,9 +30,6 @@ def api_add_pick():
         "decisionReasons", "decisionRisks", "priceStatus", "quoteStatus",
         "bestPrice", "freshBookCount", "pairedFairBookCount", "marketPricing",
         "oddsSnapshotAgeSeconds", "actionable", "evidenceSeason", "rosterVerified",
-        # Legacy call sites may still carry these names; retaining them in the
-        # request allowlist preserves compatibility even though Tracker does not
-        # make them part of the canonical release schema.
         "eventDate", "commenceTime", "projection", "probability",
     }
     payload = json_body(allowed=allowed, required={"marketKey", "side"})
@@ -45,8 +40,6 @@ def api_add_pick():
     if "stakeDollars" in payload:
         payload["stakeDollars"] = bounded_number(payload, "stakeDollars", 0, 1_000_000)
     entry = tracker.add_pick(payload)
-    # Confirming a model pick is its publication boundary for P3.7. The ledger
-    # ignores non-model/manual rows and never rewrites an existing release key.
     decision_ledger.record_delivery(
         [entry],
         context={
@@ -68,7 +61,6 @@ def api_list_picks():
 @tracker_bp.route("/api/tracker/pick/<date>/<pick_id>", methods=["PATCH"])
 @limiter.limit(60, 60, key="user")
 def api_update_pick(date, pick_id):
-    # Release fingerprint/model evidence is intentionally not patchable.
     patch = json_body(
         allowed={
             "grade", "profitDollars", "actual", "closingPrice", "closingImplied",
@@ -129,6 +121,11 @@ def api_ledger_performance():
 @tracker_bp.route("/api/tracker/learning")
 def api_learning():
     return jsonify(p38_learning.build_learning_report())
+
+
+@tracker_bp.route("/api/tracker/calibration-challenger")
+def api_calibration_challenger():
+    return jsonify(p39_calibration.build_production_report())
 
 
 @tracker_bp.route("/api/tracker/grade", methods=["POST"])
