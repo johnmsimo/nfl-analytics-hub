@@ -97,6 +97,13 @@ jobs:
           assert payload.get("schedule", {}).get("ready"), payload
           PY
 
+      - name: Bootstrap provider catalog when explicitly refreshing an empty cache
+        if: ${{ inputs.confirmation == 'RUN_ONE_EVENT_PRICE_REFRESH_VERIFY' }}
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p36_bootstrap_provider_catalog.py"
+
       - name: Run sanitized P3.6 market pricing verification
         shell: bash
         run: |
