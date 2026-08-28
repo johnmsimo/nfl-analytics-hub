@@ -206,7 +206,12 @@ def run_job(app, key):
             "game-market-refresh",
         }
         if uses_provider_lock and not _PROVIDER_SYNC_LOCK.acquire(blocking=False):
-            reason = "another provider sync or protected provider task is already running"
+            if is_provider_job:
+                reason = "another provider sync is already running"
+            elif key == "warehouse-retention":
+                reason = "another provider sync or retention run is already running"
+            else:
+                reason = "another provider sync or protected provider task is already running"
             _record(key, "skipped", reason)
             app.logger.warning("scheduled job %s skipped: %s", key, reason)
             return
