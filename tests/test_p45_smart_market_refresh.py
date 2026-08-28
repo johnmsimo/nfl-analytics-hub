@@ -199,7 +199,8 @@ def test_p45_scheduler_and_product_surface_are_wired():
     assert 'target_type = str(slate["seasonType"]).upper()' in verifier
     assert '(target_type == "PRE" and target_week >= 0)' in verifier
     assert '"opportunity_board_matches_next_slate"' in verifier
-    assert '"opportunity_board_has_model_market_coverage"' in verifier
+    assert '"opportunity_board_has_full_game_coverage"' in verifier
+    assert "covered_game_count == game_count" in verifier
     assert '"opportunity_board_state_is_consistent"' in verifier
     assert "opportunity_board_has_useful_model_pool" not in verifier
     assert "next_slate_is_2026_reg_week_one" not in verifier
