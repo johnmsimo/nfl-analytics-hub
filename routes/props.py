@@ -1,10 +1,10 @@
 """
-Props routes: per-game prop projections and the weekly edge board.
+Props routes: per-game player intelligence and the weekly edge board.
 
-Every row runs the analytic projection at the book's line (when odds exist)
-or a synthetic line at the projected median (model-only, tagged no_odds).
-Edge/EV/Kelly all flow through value_engine; displayed edge is capped ±0.30.
-Row field names follow the tracker schema so "save pick" is a pass-through.
+P3.3 keeps the transparent distribution projection as the statistical core,
+then adds evidence-aware probability calibration, uncertainty, matchup quality,
+and a model-first ranking score.  Sportsbook edge/EV/Kelly still flow through
+``value_engine`` when prices exist; model-only rows remain explicitly tagged.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from flask import Blueprint, jsonify, request
 
 import nfl_data
 import odds_api
+import player_intelligence as pi
 import projection_data as pd
 import projections as pj
 import value_engine as ve
@@ -57,50 +58,75 @@ def _best_price(rows: list[dict], side: str):
 
 
 def _build_game_rows(game: dict, season: int) -> list[dict]:
-    """All prop rows for one game: model projections joined to book prices."""
+    """All P3.3 prop rows for one game joined to available sportsbook prices."""
     ss = pd.stats_season(season)
     logs = pd.player_game_logs(ss)
     idx = pd.player_index(season, ss)
     dvp = pd.defense_vs_position(ss)
 
-    # book prop rows grouped by (normalized player, market, line)
     odds_rows: dict[tuple, list[dict]] = {}
-    ev = odds_api.find_event_for_game(game) if odds_api.is_configured() else None
-    if ev:
-        for r in odds_api.parse_prop_markets(odds_api.get_event_props(ev["id"])):
-            mk = pj.ODDS_KEY_TO_MARKET.get(r["base_key"])
-            if mk and isinstance(r.get("line"), (int, float)):
-                odds_rows.setdefault((_norm_name(r["player"]), mk, r["line"]), []).append(r)
+    event = odds_api.find_event_for_game(game) if odds_api.is_configured() else None
+    if event:
+        for row in odds_api.parse_prop_markets(odds_api.get_event_props(event["id"])):
+            market = pj.ODDS_KEY_TO_MARKET.get(row["base_key"])
+            if market and isinstance(row.get("line"), (int, float)):
+                odds_rows.setdefault((_norm_name(row["player"]), market, row["line"]), []).append(row)
 
     home, away = game["home_team"], game["away_team"]
     rows: list[dict] = []
-    for pid, meta in idx.items():
+    for player_id, meta in idx.items():
         team = meta["team"]
         if team not in (home, away) or meta["games"] < 3:
             continue
-        pos = meta["position"]
-        markets = pj.relevant_markets(pos)
+        position = meta["position"]
+        markets = pj.relevant_markets(position)
         if not markets:
             continue
+        history = logs.get(player_id, [])
+        if len(history) < 3:
+            continue
         opponent = away if team == home else home
-        nkey = _norm_name(meta["name"])
-        for mk in markets:
-            proj = pj.project_stat(logs[pid], mk, opponent=opponent,
-                                   dvp=dvp, position=pos)
-            if not proj or proj["mean"] < pj.MIN_MEAN[mk]:
+        normalized_name = _norm_name(meta["name"])
+        for market in markets:
+            # First pass establishes the projection mean used only when no real
+            # sportsbook line exists.  The second pass evaluates the actual
+            # line and applies evidence-aware probability calibration.
+            preview = pi.analyze_projection(
+                history,
+                market,
+                opponent=opponent,
+                dvp=dvp,
+                position=position,
+                roster_verified=bool(meta.get("rosterVerified")),
+            )
+            if not preview or preview["mean"] < pj.MIN_MEAN[market]:
                 continue
-            booked = [(ln, brs) for (nm, m, ln), brs in odds_rows.items()
-                      if nm == nkey and m == mk]
+            booked = [
+                (line, books)
+                for (name, offered_market, line), books in odds_rows.items()
+                if name == normalized_name and offered_market == market
+            ]
             if booked:
-                # use the line offered by the most books
-                line, brs = max(booked, key=lambda t: len({b["book"] for b in t[1]}))
+                line, books = max(booked, key=lambda item: len({book["book"] for book in item[1]}))
                 no_odds = False
-            elif mk == "anytime_td":
-                line, brs, no_odds = 0.5, [], True
+            elif market == "anytime_td":
+                line, books, no_odds = 0.5, [], True
             else:
-                line, brs, no_odds = int(proj["mean"]) + 0.5, [], True
-            p_over = pj.prob_over(proj, line)
-            best_over, best_under = _best_price(brs, "over"), _best_price(brs, "under")
+                line, books, no_odds = int(preview["mean"]) + 0.5, [], True
+
+            intelligence = pi.analyze_projection(
+                history,
+                market,
+                opponent=opponent,
+                dvp=dvp,
+                position=position,
+                line=float(line),
+                roster_verified=bool(meta.get("rosterVerified")),
+            )
+            if not intelligence or intelligence.get("probOver") is None:
+                continue
+            p_over = float(intelligence["probOver"])
+            best_over, best_under = _best_price(books, "over"), _best_price(books, "under")
             fair = None
             if best_over and best_under:
                 fair = ve.fair_prob(best_over["price"], best_under["price"])
@@ -111,30 +137,62 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
             if best_side:
                 implied = ve.american_to_implied(best_side["price"])
                 edge = _cap(p_side - implied)
-                e = ve.expected_value(p_side, best_side["price"])
-                ev_pct = round(e, 4) if e is not None else None
+                expected = ve.expected_value(p_side, best_side["price"])
+                ev_pct = round(expected, 4) if expected is not None else None
                 kelly = ve.kelly_stake(p_side, best_side["price"])["stake_pct"]
-            rows.append({
-                "gameId": game["game_id"], "season": season,
-                "week": game["week"], "gameday": (game.get("date") or "")[:10],
-                "player": meta["name"], "playerId": pid, "team": team,
-                "opponent": opponent, "position": pos,
-                "marketKey": mk, "marketLabel": pj.MARKET_LABELS[mk],
-                "line": line, "modelMean": proj["mean"],
-                "seasonMean": proj["season_mean"], "l4Mean": proj["l4_mean"],
-                "oppFactor": proj["opp_factor"], "games": proj["n"],
-                "probOver": p_over, "side": side, "modelProb": round(p_side, 4),
-                "bestOver": best_over, "bestUnder": best_under,
-                "fairProb": round(fair, 4) if fair is not None else None,
-                "impliedProb": round(implied, 4) if implied is not None else None,
-                "edge": edge, "evPct": ev_pct, "kellyPct": kelly,
-                "grade": ve.edge_grade(edge),
-                "bookCount": len({b["book"] for b in brs}),
-                "noOdds": no_odds, "modelSource": "analytic",
-                "evidenceSeason": ss,
-                "rosterVerified": bool(meta.get("rosterVerified")),
-            })
-    rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or 0)))
+            rank_score = pi.ranking_score(intelligence, edge=edge, ev=ev_pct)
+            confidence = intelligence["confidence"]
+            matchup = intelligence["matchup"]
+            rows.append(
+                {
+                    "gameId": game["game_id"],
+                    "season": season,
+                    "week": game["week"],
+                    "gameday": (game.get("date") or "")[:10],
+                    "player": meta["name"],
+                    "playerId": player_id,
+                    "team": team,
+                    "opponent": opponent,
+                    "position": position,
+                    "marketKey": market,
+                    "marketLabel": pj.MARKET_LABELS[market],
+                    "line": line,
+                    "modelMean": intelligence["mean"],
+                    "seasonMean": intelligence["season_mean"],
+                    "l4Mean": intelligence["l4_mean"],
+                    "trendPct": intelligence["trendPct"],
+                    "oppFactor": intelligence["opp_factor"],
+                    "matchupGrade": matchup["grade"],
+                    "matchupDataGames": matchup["dataGames"],
+                    "matchupDataQuality": matchup["dataQuality"],
+                    "games": intelligence["n"],
+                    "rawProbOver": intelligence["rawProbOver"],
+                    "probOver": p_over,
+                    "side": side,
+                    "modelProb": round(p_side, 4),
+                    "confidenceScore": confidence["score"],
+                    "confidenceGrade": confidence["grade"],
+                    "confidenceComponents": confidence,
+                    "projectionRange": intelligence["interval"],
+                    "riskFlags": intelligence["riskFlags"],
+                    "signalStrength": intelligence["signalStrength"],
+                    "rankScore": rank_score,
+                    "bestOver": best_over,
+                    "bestUnder": best_under,
+                    "fairProb": round(fair, 4) if fair is not None else None,
+                    "impliedProb": round(implied, 4) if implied is not None else None,
+                    "edge": edge,
+                    "evPct": ev_pct,
+                    "kellyPct": kelly,
+                    "grade": ve.edge_grade(edge),
+                    "bookCount": len({book["book"] for book in books}),
+                    "noOdds": no_odds,
+                    "modelSource": intelligence["modelVersion"],
+                    "evidenceSeason": ss,
+                    "rosterVerified": bool(meta.get("rosterVerified")),
+                }
+            )
+    rows.sort(key=lambda row: (-row["rankScore"], row["edge"] is None, -(row["edge"] or 0)))
     return rows
 
 
@@ -142,16 +200,23 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
 def api_props_game(game_id):
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
-    key = ("game", game_id, season)
+    key = ("game", game_id, season, "p3.3")
     hit = _cache_get(key)
     if hit and request.args.get("refresh") != "1":
         return jsonify(hit)
-    game = next((g for g in nfl_data.get_schedule(season)
-                 if g["game_id"] == game_id), None)
+    game = next(
+        (candidate for candidate in nfl_data.get_schedule(season) if candidate["game_id"] == game_id),
+        None,
+    )
     if not game:
         return jsonify({"error": "game not found"}), 404
-    out = {"game": game, "stats_season": pd.stats_season(season),
-           "rows": _build_game_rows(game, season)}
+    rows = _build_game_rows(game, season)
+    out = {
+        "game": game,
+        "stats_season": pd.stats_season(season),
+        "model_version": "p3.3-evidence-calibrated",
+        "rows": rows,
+    }
     _cache_set(key, out)
     return jsonify(out)
 
@@ -161,30 +226,40 @@ def api_props_board():
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
     week = int(request.args.get("week", cw["week"]))
-    stype = request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")
-    key = ("board", season, week, stype)
+    season_type = request.args.get(
+        "type", cw["season_type"] if season == cw["season"] else "REG"
+    )
+    key = ("board", season, week, season_type, "p3.3")
     hit = _cache_get(key)
     if hit and request.args.get("refresh") != "1":
         return jsonify(hit)
-    games = nfl_data.get_week_games(season, week, stype)
+    games = nfl_data.get_week_games(season, week, season_type)
     rows: list[dict] = []
-    for g in games:
-        rows.extend(_build_game_rows(g, season))
-    rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or 0), -r["probOver"]))
-    out = {"season": season, "week": week, "season_type": stype,
-           "games": len(games), "rows": rows,
-           "stats_season": pd.stats_season(season),
-           "odds_configured": odds_api.is_configured()}
+    for game in games:
+        rows.extend(_build_game_rows(game, season))
+    rows.sort(key=lambda row: (-row["rankScore"], row["edge"] is None, -(row["edge"] or 0)))
+    out = {
+        "season": season,
+        "week": week,
+        "season_type": season_type,
+        "games": len(games),
+        "rows": rows,
+        "stats_season": pd.stats_season(season),
+        "odds_configured": odds_api.is_configured(),
+        "model_version": "p3.3-evidence-calibrated",
+        "ranking": "model confidence + calibrated signal + available price value",
+    }
     _cache_set(key, out)
     return jsonify(out)
 
 
 @props_bp.route("/api/edges/week")
 def api_edges_week():
-    """Quant feed: the board filtered to positive-EV priced rows."""
+    """Quant feed: the P3.3 board filtered to positive-EV priced rows."""
     min_ev = float(request.args.get("minEv", "0.03"))
-    resp = api_props_board()
-    data = resp.get_json()
-    rows = [r for r in data["rows"]
-            if r.get("evPct") is not None and r["evPct"] >= min_ev]
+    response = api_props_board()
+    data = response.get_json()
+    rows = [
+        row for row in data["rows"] if row.get("evPct") is not None and row["evPct"] >= min_ev
+    ]
     return jsonify({**data, "rows": rows, "minEv": min_ev})
