@@ -139,8 +139,8 @@ def test_bulk_hydration_avoids_targeted_requests_when_week_is_present(monkeypatc
         lambda: (_ for _ in ()).throw(AssertionError("catalog request")),
     )
     monkeypatch.setattr(
-        p42.odds_api,
-        "fetch_event_odds_live",
+        p42,
+        "_targeted_game_odds",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("targeted request")),
     )
     monkeypatch.setattr(p42, "_save_week_snapshot", lambda *args, **kwargs: True)
@@ -164,7 +164,7 @@ def test_targeted_hydration_recovers_game_missing_from_bulk(monkeypatch):
     monkeypatch.setattr(p42.odds_api, "is_configured", lambda: True)
     monkeypatch.setattr(p42.odds_api, "get_game_odds", lambda force=False: [])
     monkeypatch.setattr(p42, "_provider_catalog", lambda: [catalog_event])
-    monkeypatch.setattr(p42.odds_api, "fetch_event_odds_live", lambda *args, **kwargs: _event())
+    monkeypatch.setattr(p42, "_targeted_game_odds", lambda *args, **kwargs: _event())
     monkeypatch.setattr(p42, "_save_week_snapshot", lambda *args, **kwargs: True)
 
     report = p42.hydrate_week(
@@ -207,12 +207,12 @@ def test_targeted_request_budget_is_hard_capped(monkeypatch):
     monkeypatch.setattr(p42.odds_api, "get_game_odds", lambda force=False: [])
     monkeypatch.setattr(p42, "_provider_catalog", lambda: catalog)
 
-    def _targeted(event_id, markets=None):
+    def _targeted(event_id):
         calls.append(str(event_id))
         source = next(row for row in catalog if row["id"] == event_id)
         return {**source, "bookmakers": []}
 
-    monkeypatch.setattr(p42.odds_api, "fetch_event_odds_live", _targeted)
+    monkeypatch.setattr(p42, "_targeted_game_odds", _targeted)
     monkeypatch.setattr(p42, "_save_week_snapshot", lambda *args, **kwargs: True)
 
     report = p42.hydrate_week(
