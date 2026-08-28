@@ -1,15 +1,13 @@
 """
 The Odds API layer for NFL (americanfootball_nfl).
 
-Ported pattern from the MLB hub: one frozen daily snapshot per day persisted
-to data/odds_cache.json (restored on boot so redeploys don't re-spend
-credits), per-event prop fetches cached inside the snapshot, and an explicit
-`fetch_event_odds_live()` bypass used only by the tracker's closing-line
-capture around kickoff.
+Ported pattern from the MLB hub: one persisted snapshot survives redeploys so
+normal product traffic does not repeatedly spend provider credits. P3.6 adds
+cache-only reads plus quote provenance/timestamps so stale prices can be shown
+for context but never promoted into actionable bets.
 
 Degrades gracefully: the API key, canonical provider registration, and explicit
-runtime feature gate must all be present. Otherwise every getter returns empty
-and the routes still 200.
+runtime feature gate must all be present before any provider request is made.
 """
 from __future__ import annotations
 
@@ -17,7 +15,7 @@ import json
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import http_client
 import nfl_data
@@ -29,12 +27,18 @@ _TRUTHY = {"1", "true", "yes", "on"}
 
 GAME_MARKETS = "h2h,spreads,totals"
 PROP_MARKETS = [
-    "player_pass_yds", "player_pass_tds", "player_rush_yds",
-    "player_receptions", "player_reception_yds", "player_anytime_td",
+    "player_pass_yds",
+    "player_pass_tds",
+    "player_rush_yds",
+    "player_receptions",
+    "player_reception_yds",
+    "player_anytime_td",
 ]
 _ALT_MARKETS = [
-    "player_pass_yds_alternate", "player_rush_yds_alternate",
-    "player_receptions_alternate", "player_reception_yds_alternate",
+    "player_pass_yds_alternate",
+    "player_rush_yds_alternate",
+    "player_receptions_alternate",
+    "player_reception_yds_alternate",
 ]
 
 _REGION = os.environ.get("ODDS_REGION", "us")
@@ -76,7 +80,7 @@ def is_configured() -> bool:
 
 
 def _today() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def _load_snapshot() -> dict:
@@ -85,8 +89,8 @@ def _load_snapshot() -> dict:
         if _snapshot is not None:
             return _snapshot
         try:
-            with open(_CACHE_FILE, "r", encoding="utf-8") as f:
-                _snapshot = json.load(f)
+            with open(_CACHE_FILE, "r", encoding="utf-8") as file:
+                _snapshot = json.load(file)
         except Exception:  # noqa: BLE001
             _snapshot = {}
         if not isinstance(_snapshot, dict):
@@ -97,8 +101,8 @@ def _load_snapshot() -> dict:
 def _save_snapshot() -> None:
     with _lock:
         tmp = _CACHE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_snapshot, f, separators=(",", ":"))
+        with open(tmp, "w", encoding="utf-8") as file:
+            json.dump(_snapshot, file, separators=(",", ":"))
         os.replace(tmp, _CACHE_FILE)
 
 
@@ -115,25 +119,57 @@ def _get(path: str, **params):
     return response.json()
 
 
+def _age_seconds(value) -> float | None:
+    try:
+        return round(max(0.0, time.time() - float(value)), 1)
+    except (TypeError, ValueError):
+        return None
+
+
 # ----------------------------------------------------------------- game odds
+
+def peek_game_odds() -> list[dict]:
+    """Return cached game events without making a provider request."""
+    snap = _load_snapshot()
+    with _lock:
+        block = snap.get("game_odds") or {}
+        events = block.get("events") or []
+        return list(events) if isinstance(events, list) else []
+
 
 def get_game_odds(force: bool = False) -> list[dict]:
     """Featured markets (h2h/spreads/totals) for all upcoming NFL events.
-    Snapshot-cached per day with a TTL; costs ~3 credits per refresh."""
+
+    The persisted snapshot is reused within the configured TTL. A provider call
+    occurs only when the integration is fully enabled and the snapshot is stale
+    or ``force=True``.
+    """
     if not is_configured():
         return []
     snap = _load_snapshot()
     with _lock:
-        blk = snap.get("game_odds") or {}
-        fresh = (blk.get("date") == _today()
-                 and time.time() - blk.get("fetched_at", 0) < _GAME_TTL)
+        block = snap.get("game_odds") or {}
+        fresh = (
+            block.get("date") == _today()
+            and time.time() - block.get("fetched_at", 0) < _GAME_TTL
+        )
         if fresh and not force:
-            return blk.get("events", [])
-    events = _get(f"/sports/{SPORT}/odds",
-                  regions=_REGION, markets=GAME_MARKETS, oddsFormat="american") or []
+            return block.get("events", [])
+    events = (
+        _get(
+            f"/sports/{SPORT}/odds",
+            regions=_REGION,
+            markets=GAME_MARKETS,
+            oddsFormat="american",
+        )
+        or []
+    )
     with _lock:
-        snap["game_odds"] = {"date": _today(), "fetched_at": time.time(),
-                             "events": events}
+        snap["game_odds"] = {
+            "date": _today(),
+            "fetched_at": time.time(),
+            "events": events,
+        }
         _save_snapshot()
     return events
 
@@ -143,11 +179,11 @@ def _norm(name: str | None) -> str:
 
 
 def norm_player_name(name: str | None) -> str:
-    """Normalize a player name for cross-source matching (ESPN <-> books):
-    lowercase, ascii-fold, strip punctuation."""
+    """Normalize a player name for cross-source matching (ESPN <-> books)."""
     import unicodedata
-    s = unicodedata.normalize("NFKD", (name or "")).encode("ascii", "ignore").decode()
-    return s.lower().replace(".", "").replace("'", "").replace("-", " ").strip()
+
+    text = unicodedata.normalize("NFKD", (name or "")).encode("ascii", "ignore").decode()
+    return text.lower().replace(".", "").replace("'", "").replace("-", " ").strip()
 
 
 def _nickname(name: str | None) -> str:
@@ -156,33 +192,60 @@ def _nickname(name: str | None) -> str:
     return parts[-1] if parts else ""
 
 
-def find_event_for_game(game: dict) -> dict | None:
-    """Match an ESPN schedule game to an Odds API event.
-
-    Full names usually agree, but the two sources spell cities differently often
-    enough (``LA Rams`` against ``Los Angeles Rams``) that an exact match alone
-    would leave a priced board looking empty. Nicknames are unique across the
-    league, so they settle anything the exact match misses.
-    """
+def _match_event(game: dict, events: list[dict]) -> dict | None:
     home, away = _norm(game.get("home_name")), _norm(game.get("away_name"))
-    events = get_game_odds()
-    for ev in events:
-        if _norm(ev.get("home_team")) == home and _norm(ev.get("away_team")) == away:
-            return ev
-    home_nick, away_nick = _nickname(game.get("home_name")), _nickname(game.get("away_name"))
+    for event in events:
+        if _norm(event.get("home_team")) == home and _norm(event.get("away_team")) == away:
+            return event
+    home_nick = _nickname(game.get("home_name"))
+    away_nick = _nickname(game.get("away_name"))
     if not home_nick or not away_nick:
         return None
-    for ev in events:
-        if (_nickname(ev.get("home_team")) == home_nick
-                and _nickname(ev.get("away_team")) == away_nick):
-            return ev
+    for event in events:
+        if (
+            _nickname(event.get("home_team")) == home_nick
+            and _nickname(event.get("away_team")) == away_nick
+        ):
+            return event
     return None
+
+
+def find_event_for_game(game: dict, *, cache_only: bool = False, force: bool = False) -> dict | None:
+    """Match an ESPN game to an Odds API event.
+
+    ``cache_only=True`` is the zero-credit P3.6 verification/product fallback.
+    The default remains backward compatible with prior callers.
+    """
+    events = peek_game_odds() if cache_only else get_game_odds(force=force)
+    return _match_event(game, events)
 
 
 # ---------------------------------------------------------------- event props
 
 def _prop_market_keys() -> list[str]:
     return PROP_MARKETS + (_ALT_MARKETS if _INCLUDE_ALT else [])
+
+
+def event_props_snapshot(odds_event_id: str) -> dict:
+    """Return cached event-prop data and provenance without provider access."""
+    snap = _load_snapshot()
+    with _lock:
+        cell = dict((snap.get("event_props") or {}).get(odds_event_id) or {})
+    fetched_at = cell.get("fetched_at")
+    return {
+        "event_id": odds_event_id,
+        "date": cell.get("date"),
+        "fetched_at": fetched_at,
+        "age_seconds": _age_seconds(fetched_at),
+        "closing": bool(cell.get("closing")),
+        "data": cell.get("data"),
+        "available": "data" in cell and cell.get("data") is not None,
+    }
+
+
+def peek_event_props(odds_event_id: str) -> dict | None:
+    """Return cached props for an event without making a provider request."""
+    return event_props_snapshot(odds_event_id).get("data")
 
 
 def get_event_props(odds_event_id: str, force: bool = False) -> dict | None:
@@ -192,116 +255,193 @@ def get_event_props(odds_event_id: str, force: bool = False) -> dict | None:
     snap = _load_snapshot()
     with _lock:
         cell = (snap.get("event_props") or {}).get(odds_event_id)
-        if (cell and not force and cell.get("date") == _today()
-                and time.time() - cell.get("fetched_at", 0) < _PROPS_TTL):
+        if (
+            cell
+            and not force
+            and cell.get("date") == _today()
+            and time.time() - cell.get("fetched_at", 0) < _PROPS_TTL
+        ):
             return cell.get("data")
     try:
-        data = _get(f"/sports/{SPORT}/events/{odds_event_id}/odds",
-                    regions=_REGION, markets=",".join(_prop_market_keys()),
-                    oddsFormat="american")
-    except RuntimeError as e:
+        data = _get(
+            f"/sports/{SPORT}/events/{odds_event_id}/odds",
+            regions=_REGION,
+            markets=",".join(_prop_market_keys()),
+            oddsFormat="american",
+        )
+    except RuntimeError as exc:
         # 422 = markets not yet posted for this event; cache the miss briefly.
         data = None
-        if "422" not in str(e):
+        if "422" not in str(exc):
             raise
     with _lock:
         snap.setdefault("event_props", {})[odds_event_id] = {
-            "date": _today(), "fetched_at": time.time(), "data": data}
+            "date": _today(),
+            "fetched_at": time.time(),
+            "data": data,
+        }
         _save_snapshot()
     return data
 
 
+def refresh_game_props(game: dict, *, force_game_events: bool = False) -> dict:
+    """Explicitly hydrate one game's prop snapshot.
+
+    This helper can spend provider credits and is intended for protected/manual
+    workflows or tightly targeted product refreshes, never broad verification.
+    """
+    event = find_event_for_game(game, force=force_game_events)
+    if not event:
+        return {"ok": False, "reason": "event_not_found", "event_id": None}
+    data = get_event_props(str(event["id"]), force=True)
+    snapshot = event_props_snapshot(str(event["id"]))
+    return {
+        "ok": data is not None,
+        "reason": None if data is not None else "props_unavailable",
+        "event_id": event["id"],
+        "fetched_at": snapshot.get("fetched_at"),
+        "age_seconds": snapshot.get("age_seconds"),
+    }
+
+
 def fetch_event_odds_live(odds_event_id: str, markets: list[str] | None = None) -> dict | None:
-    """Force-refresh one event's odds RIGHT NOW, bypassing the daily snapshot.
-    Used only by the closing-line capture around kickoff — ~1 credit/market."""
+    """Force-refresh one event right now, bypassing the normal snapshot TTL."""
     if not is_configured():
         return None
-    data = _get(f"/sports/{SPORT}/events/{odds_event_id}/odds",
-                regions=_REGION,
-                markets=",".join(markets or (_prop_market_keys() + GAME_MARKETS.split(","))),
-                oddsFormat="american")
+    data = _get(
+        f"/sports/{SPORT}/events/{odds_event_id}/odds",
+        regions=_REGION,
+        markets=",".join(markets or (_prop_market_keys() + GAME_MARKETS.split(","))),
+        oddsFormat="american",
+    )
     with _lock:
         snap = _load_snapshot()
         snap.setdefault("event_props", {})[odds_event_id] = {
-            "date": _today(), "fetched_at": time.time(), "data": data,
-            "closing": True}
+            "date": _today(),
+            "fetched_at": time.time(),
+            "data": data,
+            "closing": True,
+        }
         _save_snapshot()
     return data
 
 
 # ------------------------------------------------------------------- parsing
 
-def parse_game_markets(ev: dict) -> dict:
-    """One Odds API event -> {h2h: {book: {home,away}}, spreads: ..., totals: ...}."""
+def parse_game_markets(event: dict) -> dict:
+    """One Odds API event -> normalized h2h/spread/total rows."""
     out: dict = {"h2h": [], "spreads": [], "totals": []}
-    home, away = ev.get("home_team"), ev.get("away_team")
-    for bk in ev.get("bookmakers", []):
-        book = bk.get("title") or bk.get("key")
-        for m in bk.get("markets", []):
-            mkey = m.get("key")
-            oc = {o.get("name"): o for o in m.get("outcomes", [])}
-            if mkey == "h2h" and home in oc and away in oc:
-                out["h2h"].append({"book": book,
-                                   "home_price": oc[home].get("price"),
-                                   "away_price": oc[away].get("price")})
-            elif mkey == "spreads" and home in oc and away in oc:
-                out["spreads"].append({"book": book,
-                                       "home_point": oc[home].get("point"),
-                                       "home_price": oc[home].get("price"),
-                                       "away_point": oc[away].get("point"),
-                                       "away_price": oc[away].get("price")})
-            elif mkey == "totals":
-                over, under = oc.get("Over"), oc.get("Under")
+    home, away = event.get("home_team"), event.get("away_team")
+    for bookmaker in event.get("bookmakers", []):
+        book = bookmaker.get("title") or bookmaker.get("key")
+        for market in bookmaker.get("markets", []):
+            market_key = market.get("key")
+            outcomes = {outcome.get("name"): outcome for outcome in market.get("outcomes", [])}
+            if market_key == "h2h" and home in outcomes and away in outcomes:
+                out["h2h"].append(
+                    {
+                        "book": book,
+                        "home_price": outcomes[home].get("price"),
+                        "away_price": outcomes[away].get("price"),
+                    }
+                )
+            elif market_key == "spreads" and home in outcomes and away in outcomes:
+                out["spreads"].append(
+                    {
+                        "book": book,
+                        "home_point": outcomes[home].get("point"),
+                        "home_price": outcomes[home].get("price"),
+                        "away_point": outcomes[away].get("point"),
+                        "away_price": outcomes[away].get("price"),
+                    }
+                )
+            elif market_key == "totals":
+                over, under = outcomes.get("Over"), outcomes.get("Under")
                 if over and under:
-                    out["totals"].append({"book": book,
-                                          "point": over.get("point"),
-                                          "over_price": over.get("price"),
-                                          "under_price": under.get("price")})
+                    out["totals"].append(
+                        {
+                            "book": book,
+                            "point": over.get("point"),
+                            "over_price": over.get("price"),
+                            "under_price": under.get("price"),
+                        }
+                    )
     return out
 
 
-def parse_prop_markets(event_odds: dict | None) -> list[dict]:
-    """Event props payload -> flat rows:
-    {market_key, base_key, is_alt, player, line, side, price, book}.
-    player_anytime_td has no Over/Under — it's Yes-shaped; side='over', line=0.5."""
+def parse_prop_markets(event_odds: dict | None, *, fetched_at=None) -> list[dict]:
+    """Event props payload -> flat timestamped quote rows.
+
+    P3.6 preserves provider update time plus local snapshot fetch time. Existing
+    callers may continue supplying only ``event_odds``.
+    """
     rows: list[dict] = []
     if not event_odds:
         return rows
-    for bk in event_odds.get("bookmakers", []):
-        book = bk.get("title") or bk.get("key")
-        for m in bk.get("markets", []):
-            mkey = m.get("key") or ""
-            base = mkey.replace("_alternate", "")
-            is_alt = mkey.endswith("_alternate")
-            for o in m.get("outcomes", []):
-                player = o.get("description") or o.get("name")
-                side = _norm(o.get("name"))
+    for bookmaker in event_odds.get("bookmakers", []):
+        book = bookmaker.get("title") or bookmaker.get("key")
+        book_key = bookmaker.get("key") or book
+        book_last_update = bookmaker.get("last_update")
+        for market in bookmaker.get("markets", []):
+            market_key = market.get("key") or ""
+            base = market_key.replace("_alternate", "")
+            is_alt = market_key.endswith("_alternate")
+            market_last_update = market.get("last_update")
+            for outcome in market.get("outcomes", []):
+                player = outcome.get("description") or outcome.get("name")
+                side = _norm(outcome.get("name"))
+                common = {
+                    "market_key": market_key,
+                    "base_key": base,
+                    "is_alt": is_alt,
+                    "player": player,
+                    "price": outcome.get("price"),
+                    "book": book,
+                    "book_key": book_key,
+                    "book_last_update": book_last_update,
+                    "market_last_update": market_last_update,
+                    "fetched_at": fetched_at,
+                }
                 if base == "player_anytime_td":
                     if side not in ("yes", "no"):
                         continue
-                    rows.append({"market_key": mkey, "base_key": base,
-                                 "is_alt": is_alt, "player": player,
-                                 "line": 0.5,
-                                 "side": "over" if side == "yes" else "under",
-                                 "price": o.get("price"), "book": book})
+                    rows.append(
+                        {
+                            **common,
+                            "line": 0.5,
+                            "side": "over" if side == "yes" else "under",
+                        }
+                    )
                 elif side in ("over", "under"):
-                    rows.append({"market_key": mkey, "base_key": base,
-                                 "is_alt": is_alt, "player": player,
-                                 "line": o.get("point"), "side": side,
-                                 "price": o.get("price"), "book": book})
+                    rows.append(
+                        {
+                            **common,
+                            "line": outcome.get("point"),
+                            "side": side,
+                        }
+                    )
     return rows
 
 
 def snapshot_status() -> dict:
     snap = _load_snapshot()
-    blk = snap.get("game_odds") or {}
+    block = snap.get("game_odds") or {}
+    event_cells = snap.get("event_props") or {}
+    event_ages = [
+        age
+        for age in (_age_seconds(cell.get("fetched_at")) for cell in event_cells.values())
+        if age is not None
+    ]
     return {
         "provider_key": PROVIDER_KEY,
         "key_configured": has_api_key(),
         "provider_enabled": provider_enabled(),
         "feature_enabled": feature_enabled(),
         "configured": is_configured(),
-        "snapshot_date": blk.get("date"),
-        "game_events": len(blk.get("events", [])),
-        "event_props_cached": len(snap.get("event_props") or {}),
+        "snapshot_date": block.get("date"),
+        "game_events": len(block.get("events", [])),
+        "game_snapshot_age_seconds": _age_seconds(block.get("fetched_at")),
+        "event_props_cached": len(event_cells),
+        "freshest_event_props_age_seconds": min(event_ages) if event_ages else None,
+        "oldest_event_props_age_seconds": max(event_ages) if event_ages else None,
     }
