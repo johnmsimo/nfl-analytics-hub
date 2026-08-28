@@ -1,32 +1,32 @@
 """
-Bet tracker — picks CRUD, grading, closing-line value (CLV).
+Bet tracker — persistent pick CRUD, grading, closing-line value (CLV).
 
-Direct port of the MLB hub's tracker schema so the mental model carries over:
-data/daily_tracker.json is {YYYY-MM-DD: {entries: [...], capturedAt,
-gradedAt, closingCapturedAt}}; entries carry id/savedAt/gradedAt/marketKey/
-line/side/price/grade/modelProb/clvEdge/...; dedup key when no id is
-(date, gameId, player, marketKey, line).
+P3.7 keeps the long-standing Tracker API/UI contract while moving its canonical
+state from Fly-local JSON files into PostgreSQL. The legacy files remain a
+best-effort development mirror/bootstrap source only.
 
-Primary KPI = CLV: clvEdge = closingImplied - openingImplied (positive =
-you beat the close). Closing capture force-refreshes each game's odds in a
-window around kickoff (games carrying pending picks only) — without it the
-daily snapshot is frozen and open == close by construction.
+Primary KPI remains CLV: clvEdge = closingImplied - openingImplied (positive =
+you beat the close). P3.7 also reports Brier/ECE for graded tracked picks and
+preserves an immutable release fingerprint for each first-saved selection.
 
 Grading reads final stats from nfl_data's boxscore-fed weekly rows (ESPN,
 available minutes after games end) and final scores from the schedule.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
+from typing import Any
 
 import nfl_data
 import odds_api
 import projections
+import tracker_store
 import value_engine as ve
 
 _norm_name = odds_api.norm_player_name
@@ -34,7 +34,7 @@ _norm_name = odds_api.norm_player_name
 _STORE_FILE = os.path.join(nfl_data.DATA_DIR, "daily_tracker.json")
 _SETTINGS_FILE = os.path.join(nfl_data.DATA_DIR, "model_adjustments.json")
 _lock = threading.RLock()
-_store_cache: tuple | None = None      # (sig, store)
+_store_cache: tuple | None = None      # file-fallback cache only
 _closing_captured: set[str] = set()    # game_ids already captured this process
 
 PROP_STAT = {
@@ -61,17 +61,44 @@ def _sig() -> tuple:
         return (0, 0)
 
 
+def _read_json_file(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:  # noqa: BLE001 - legacy/fallback files are best effort
+        return {}
+
+
+def _write_json_file(path: str, payload: dict) -> None:
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, separators=(",", ":"))
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 - PostgreSQL remains canonical in production
+        pass
+
+
 def _load() -> dict:
+    """Load canonical Tracker state, bootstrapping a legacy file when needed."""
     global _store_cache
     with _lock:
+        persistence = tracker_store.persistence_status()
+        if persistence.get("available"):
+            store = tracker_store.load_store()
+            if store:
+                return json.loads(json.dumps(store))
+            legacy = _read_json_file(_STORE_FILE)
+            if legacy:
+                tracker_store.save_store(legacy)
+                return json.loads(json.dumps(legacy))
+            return {}
+
         sig = _sig()
         if _store_cache and _store_cache[0] == sig:
             return json.loads(json.dumps(_store_cache[1]))
-        try:
-            with open(_STORE_FILE, "r", encoding="utf-8") as f:
-                store = json.load(f)
-        except Exception:  # noqa: BLE001
-            store = {}
+        store = _read_json_file(_STORE_FILE)
         _store_cache = (sig, store)
         return json.loads(json.dumps(store))
 
@@ -79,11 +106,13 @@ def _load() -> dict:
 def _save(store: dict) -> None:
     global _store_cache
     with _lock:
-        tmp = _STORE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(store, f, separators=(",", ":"))
-        os.replace(tmp, _STORE_FILE)
+        persisted = tracker_store.save_store(store)
+        # Keep a local mirror for development/recovery, but production truth is
+        # the database whenever persistence is available.
+        _write_json_file(_STORE_FILE, store)
         _store_cache = (_sig(), store)
+        if not persisted:
+            return
 
 
 def _now() -> str:
@@ -97,58 +126,107 @@ def _today() -> str:
 def get_settings() -> dict:
     defaults = {"bankroll": 1000.0, "kelly_fraction": 0.25,
                 "max_bet_pct": 0.05, "unit_pct": 0.01}
-    try:
-        with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
-            defaults.update(json.load(f))
-    except Exception:  # noqa: BLE001
-        pass
+    persistence = tracker_store.persistence_status()
+    if persistence.get("available"):
+        stored = tracker_store.load_settings()
+        if stored:
+            defaults.update(stored)
+            return defaults
+        legacy = _read_json_file(_SETTINGS_FILE)
+        defaults.update(legacy)
+        tracker_store.save_settings(defaults)
+        return defaults
+    defaults.update(_read_json_file(_SETTINGS_FILE))
     return defaults
 
 
 def save_settings(patch: dict) -> dict:
     cur = get_settings()
-    for k in ("bankroll", "kelly_fraction", "max_bet_pct", "unit_pct"):
-        if k in patch:
+    for key in ("bankroll", "kelly_fraction", "max_bet_pct", "unit_pct"):
+        if key in patch:
             try:
-                cur[k] = float(patch[k])
+                cur[key] = float(patch[key])
             except (TypeError, ValueError):
                 pass
-    tmp = _SETTINGS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cur, f)
-    os.replace(tmp, _SETTINGS_FILE)
+    tracker_store.save_settings(cur)
+    _write_json_file(_SETTINGS_FILE, cur)
     return cur
+
+
+def persistence_status() -> dict[str, Any]:
+    status = tracker_store.persistence_status()
+    return {
+        **status,
+        "legacyMirrorPresent": os.path.exists(_STORE_FILE),
+        "settingsMirrorPresent": os.path.exists(_SETTINGS_FILE),
+    }
 
 
 # ---------------------------------------------------------------------- picks
 
-_PICK_FIELDS = ("gameId", "season", "week", "gameday", "player", "playerId",
-                "team", "opponent", "position", "marketKey", "marketLabel",
-                "line", "side", "price", "book", "stakeDollars", "stakeUnits",
-                "modelProb", "impliedProb", "fairProb", "edge", "evPct",
-                "modelSource", "source")
+_PICK_FIELDS = (
+    "gameId", "season", "week", "gameday", "player", "playerId",
+    "team", "opponent", "position", "marketKey", "marketLabel",
+    "line", "side", "price", "book", "stakeDollars", "stakeUnits",
+    "modelProb", "impliedProb", "fairProb", "fairMarketProb", "referenceProb",
+    "edge", "evPct", "kellyPct", "modelSource", "decisionModelVersion", "source",
+    "modelMean", "consensusProb", "simulationProb", "simulationAgreement",
+    "confidenceScore", "confidenceGrade", "matchupGrade", "decisionGrade",
+    "decisionScore", "decisionReasons", "decisionRisks", "priceStatus",
+    "quoteStatus", "bestPrice", "freshBookCount", "pairedFairBookCount",
+    "marketPricing", "oddsSnapshotAgeSeconds", "actionable", "evidenceSeason",
+    "rosterVerified",
+)
+
+
+def _release_fingerprint(entry: dict) -> str:
+    release = {key: entry.get(key) for key in _PICK_FIELDS if key in entry}
+    raw = json.dumps(release, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def add_pick(payload: dict) -> dict:
     date = payload.get("gameday") or _today()
-    entry = {k: payload.get(k) for k in _PICK_FIELDS}
+    entry = {key: payload.get(key) for key in _PICK_FIELDS}
     entry["id"] = payload.get("id") or uuid.uuid4().hex[:12]
     entry["savedAt"] = _now()
     entry["grade"] = "pending"
     entry["gradedAt"] = None
+    if entry.get("price") is None and isinstance(entry.get("bestPrice"), dict):
+        best = entry["bestPrice"]
+        if isinstance(best.get("price"), (int, float)):
+            entry["price"] = best.get("price")
+        if not entry.get("book") and best.get("book"):
+            entry["book"] = best.get("book")
     if entry.get("price") is not None:
         entry["openingImplied"] = ve.american_to_implied(entry["price"])
+    entry["releaseFingerprint"] = _release_fingerprint(entry)
+    entry["receiptVersion"] = "p3.7"
+
     store = _load()
     day = store.setdefault(date, {"entries": []})
     dedup = (date, entry.get("gameId"), entry.get("player"),
-             entry.get("marketKey"), entry.get("line"))
-    for i, e in enumerate(day["entries"]):
-        if (date, e.get("gameId"), e.get("player"), e.get("marketKey"),
-                e.get("line")) == dedup:
-            entry["id"] = e["id"]           # replace in place, keep identity
-            day["entries"][i] = entry
-            _save(store)
-            return entry
+             entry.get("marketKey"), entry.get("line"), entry.get("side"))
+    for existing in day["entries"]:
+        existing_key = (
+            date,
+            existing.get("gameId"),
+            existing.get("player"),
+            existing.get("marketKey"),
+            existing.get("line"),
+            existing.get("side"),
+        )
+        if existing_key == dedup:
+            # First publication is immutable. A duplicate save may update only
+            # user allocation fields; model/price/result history is preserved.
+            changed = False
+            for key in ("stakeDollars", "stakeUnits"):
+                if payload.get(key) is not None and existing.get(key) != payload.get(key):
+                    existing[key] = payload.get(key)
+                    changed = True
+            if changed:
+                _save(store)
+            return existing
     day["entries"].append(entry)
     _save(store)
     return entry
@@ -156,13 +234,13 @@ def add_pick(payload: dict) -> dict:
 
 def update_pick(date: str, pick_id: str, patch: dict) -> dict | None:
     store = _load()
-    for e in store.get(date, {}).get("entries", []):
-        if e["id"] == pick_id:
-            for k, v in patch.items():
-                if k not in ("id", "savedAt"):
-                    e[k] = v
+    for entry in store.get(date, {}).get("entries", []):
+        if entry["id"] == pick_id:
+            for key, value in patch.items():
+                if key not in ("id", "savedAt", "releaseFingerprint", "receiptVersion"):
+                    entry[key] = value
             _save(store)
-            return e
+            return entry
     return None
 
 
@@ -172,7 +250,7 @@ def delete_pick(date: str, pick_id: str) -> bool:
     if not day:
         return False
     before = len(day["entries"])
-    day["entries"] = [e for e in day["entries"] if e["id"] != pick_id]
+    day["entries"] = [entry for entry in day["entries"] if entry["id"] != pick_id]
     if len(day["entries"]) == before:
         return False
     _save(store)
@@ -188,25 +266,24 @@ def list_picks(date: str | None = None) -> dict:
 
 # -------------------------------------------------------------------- grading
 
-def _grade_game_market(e: dict, game: dict) -> tuple[str, float] | None:
-    hs, as_ = game.get("home_score"), game.get("away_score")
-    if hs is None or as_ is None:
+def _grade_game_market(entry: dict, game: dict) -> tuple[str, float] | None:
+    home_score, away_score = game.get("home_score"), game.get("away_score")
+    if home_score is None or away_score is None:
         return None
-    mk, side, line = e["marketKey"], e.get("side"), e.get("line")
-    if mk == "h2h":
-        if hs == as_:
+    market, side, line = entry["marketKey"], entry.get("side"), entry.get("line")
+    if market == "h2h":
+        if home_score == away_score:
             return ("push", 0.0)
-        winner = "home" if hs > as_ else "away"
-        return ("win" if side == winner else "loss", float(hs if side == "home" else as_))
-    if mk == "spread":
-        # line is the picked team's spread (e.g. home -3.5 stored as -3.5)
-        margin = (hs - as_) if side == "home" else (as_ - hs)
-        adj = margin + float(line or 0)
-        if adj == 0:
+        winner = "home" if home_score > away_score else "away"
+        return ("win" if side == winner else "loss", float(home_score if side == "home" else away_score))
+    if market == "spread":
+        margin = (home_score - away_score) if side == "home" else (away_score - home_score)
+        adjusted = margin + float(line or 0)
+        if adjusted == 0:
             return ("push", margin)
-        return ("win" if adj > 0 else "loss", margin)
-    if mk == "total":
-        total = hs + as_
+        return ("win" if adjusted > 0 else "loss", margin)
+    if market == "total":
+        total = home_score + away_score
         if total == line:
             return ("push", total)
         over = total > float(line or 0)
@@ -214,64 +291,67 @@ def _grade_game_market(e: dict, game: dict) -> tuple[str, float] | None:
     return None
 
 
-def _grade_prop(e: dict, stat_rows: dict) -> tuple[str, float] | None:
-    row = stat_rows.get((e.get("gameId"), str(e.get("playerId"))))
+def _grade_prop(entry: dict, stat_rows: dict) -> tuple[str, float] | None:
+    row = stat_rows.get((entry.get("gameId"), str(entry.get("playerId"))))
     if row is None:
         return None
-    mk = e["marketKey"]
-    if mk == "anytime_td":
+    market = entry["marketKey"]
+    if market == "anytime_td":
         actual = row["rushing_tds"] + row["receiving_tds"]
     else:
-        col = PROP_STAT.get(mk)
-        if not col:
+        column = PROP_STAT.get(market)
+        if not column:
             return None
-        actual = row[col]
-    line = float(e.get("line") or 0)
+        actual = row[column]
+    line = float(entry.get("line") or 0)
     if actual == line:
         return ("push", actual)
     over = actual > line
-    return ("win" if (e.get("side") == "over") == over else "loss", actual)
+    return ("win" if (entry.get("side") == "over") == over else "loss", actual)
 
 
 def grade_pending() -> dict:
     """Grade every pending pick whose game is final. Returns counts."""
     store = _load()
     seasons: set[int] = set()
-    for date, day in store.items():
-        for e in day.get("entries", []):
-            if e.get("grade") == "pending" and e.get("season"):
-                seasons.add(int(e["season"]))
+    for day in store.values():
+        for entry in day.get("entries", []):
+            if entry.get("grade") == "pending" and entry.get("season"):
+                seasons.add(int(entry["season"]))
     stat_rows: dict = {}
     games_by_id: dict = {}
     for season in seasons:
-        for g in nfl_data.get_schedule(season):
-            games_by_id[g["game_id"]] = g
-        for r in nfl_data.get_player_week_stats(season):
-            stat_rows[(r["game_id"], r["player_id"])] = r
+        for game in nfl_data.get_schedule(season):
+            games_by_id[game["game_id"]] = game
+        for row in nfl_data.get_player_week_stats(season):
+            stat_rows[(row["game_id"], row["player_id"])] = row
 
     graded = 0
-    for date, day in store.items():
-        for e in day.get("entries", []):
-            if e.get("grade") != "pending":
+    for day in store.values():
+        for entry in day.get("entries", []):
+            if entry.get("grade") != "pending":
                 continue
-            game = games_by_id.get(e.get("gameId"))
+            game = games_by_id.get(entry.get("gameId"))
             if not game or not game.get("completed"):
                 continue
-            res = (_grade_game_market(e, game) if e["marketKey"] in GAME_MARKETS
-                   else _grade_prop(e, stat_rows))
-            if not res:
+            result = (
+                _grade_game_market(entry, game)
+                if entry["marketKey"] in GAME_MARKETS
+                else _grade_prop(entry, stat_rows)
+            )
+            if not result:
                 continue
-            grade, actual = res
-            e["grade"] = grade
-            e["actual"] = actual
-            e["gradedAt"] = _now()
-            stake = float(e.get("stakeDollars") or 0)
-            dec = ve.american_to_decimal(e.get("price")) or 1.0
-            e["profitDollars"] = round(
-                stake * (dec - 1) if grade == "win"
+            grade, actual = result
+            entry["grade"] = grade
+            entry["actual"] = actual
+            entry["gradedAt"] = _now()
+            stake = float(entry.get("stakeDollars") or 0)
+            decimal = ve.american_to_decimal(entry.get("price")) or 1.0
+            entry["profitDollars"] = round(
+                stake * (decimal - 1) if grade == "win"
                 else (-stake if grade == "loss" else 0.0), 2)
             graded += 1
-        if any(x.get("gradedAt") for x in day.get("entries", [])):
+        if any(item.get("gradedAt") for item in day.get("entries", [])):
             day["gradedAt"] = _now()
     if graded:
         _save(store)
@@ -282,68 +362,66 @@ def grade_pending() -> dict:
 
 def _kickoff_window(game: dict) -> bool:
     try:
-        ko = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
+        kickoff = datetime.fromisoformat(game["date"].replace("Z", "+00:00"))
     except Exception:  # noqa: BLE001
         return False
     now = datetime.now(timezone.utc)
-    return (ko - timedelta(minutes=CLOSING_LEAD_MIN)
-            <= now <= ko + timedelta(minutes=CLOSING_GRACE_MIN))
+    return (
+        kickoff - timedelta(minutes=CLOSING_LEAD_MIN)
+        <= now
+        <= kickoff + timedelta(minutes=CLOSING_GRACE_MIN)
+    )
 
 
 def closing_capture_once() -> dict:
-    """For games in their kickoff window carrying pending picks: force-refresh
-    that game's odds once and record closing price + clvEdge on each pick."""
+    """Capture one closing quote per pending tracked game around kickoff."""
     if not odds_api.is_configured():
         return {"captured": 0, "reason": "odds not configured"}
     store = _load()
     captured = 0
     changed = False
-    for date, day in store.items():
-        pend = [e for e in day.get("entries", [])
-                if e.get("grade") == "pending" and e.get("closingPrice") is None]
-        if not pend:
+    for day in store.values():
+        pending = [
+            entry for entry in day.get("entries", [])
+            if entry.get("grade") == "pending" and entry.get("closingPrice") is None
+        ]
+        if not pending:
             continue
         by_game: dict[str, list[dict]] = {}
-        for e in pend:
-            if e.get("gameId"):
-                by_game.setdefault(e["gameId"], []).append(e)
-        # The in-process guard below is wiped by any restart, and Fly stops idle
-        # machines by design, so the fact that a game's closing odds were already
-        # bought has to outlive the process. Picks whose closing price was
-        # recorded drop out on their own, but a game whose line moved off every
-        # pick's number records nothing and would otherwise be re-bought — about
-        # nine credits a time, every five minutes of its kickoff window.
+        for entry in pending:
+            if entry.get("gameId"):
+                by_game.setdefault(entry["gameId"], []).append(entry)
         attempted = set(day.get("closingAttempted") or [])
-        for gid, entries in by_game.items():
+        for game_id, entries in by_game.items():
             season = int(entries[0].get("season") or nfl_data.default_season())
-            game = next((g for g in nfl_data.get_schedule(season)
-                         if g["game_id"] == gid), None)
-            if not game or gid in _closing_captured or gid in attempted:
+            game = next(
+                (candidate for candidate in nfl_data.get_schedule(season) if candidate["game_id"] == game_id),
+                None,
+            )
+            if not game or game_id in _closing_captured or game_id in attempted:
                 continue
             if not _kickoff_window(game):
                 continue
-            ev = odds_api.find_event_for_game(game)
-            if not ev:
+            event = odds_api.find_event_for_game(game)
+            if not event:
                 continue
-            data = odds_api.fetch_event_odds_live(ev["id"])
-            _closing_captured.add(gid)
-            # The credit is spent whether or not a line matched, so persist the
-            # attempt, not just a successful capture.
-            attempted.add(gid)
+            data = odds_api.fetch_event_odds_live(event["id"])
+            _closing_captured.add(game_id)
+            attempted.add(game_id)
             day["closingAttempted"] = sorted(attempted)
             changed = True
-            rows = odds_api.parse_prop_markets(data or {})
-            gm = odds_api.parse_game_markets({**ev, **(data or {})})
-            for e in entries:
-                price = _closing_price_for(e, rows, gm)
+            prop_rows = odds_api.parse_prop_markets(data or {})
+            game_markets = odds_api.parse_game_markets({**event, **(data or {})})
+            for entry in entries:
+                price = _closing_price_for(entry, prop_rows, game_markets)
                 if price is None:
                     continue
-                e["closingPrice"] = price
+                entry["closingPrice"] = price
                 closing_imp = ve.american_to_implied(price)
-                opening_imp = e.get("openingImplied") or ve.american_to_implied(e.get("price"))
+                opening_imp = entry.get("openingImplied") or ve.american_to_implied(entry.get("price"))
                 if closing_imp is not None and opening_imp is not None:
-                    e["closingImplied"] = round(closing_imp, 4)
-                    e["clvEdge"] = round(closing_imp - opening_imp, 4)
+                    entry["closingImplied"] = round(closing_imp, 4)
+                    entry["clvEdge"] = round(closing_imp - opening_imp, 4)
                 captured += 1
                 changed = True
         if captured:
@@ -353,127 +431,205 @@ def closing_capture_once() -> dict:
     return {"captured": captured}
 
 
-def _closing_price_for(e: dict, prop_rows: list[dict], gm: dict):
+def _closing_price_for(entry: dict, prop_rows: list[dict], game_markets: dict):
     """Best closing price for the pick's exact (player, market, line, side)."""
-    mk, side, line = e.get("marketKey"), e.get("side"), e.get("line")
-    if mk in GAME_MARKETS:
-        blk = {"h2h": gm.get("h2h", []), "spread": gm.get("spreads", []),
-               "total": gm.get("totals", [])}[mk]
+    market, side, line = entry.get("marketKey"), entry.get("side"), entry.get("line")
+    if market in GAME_MARKETS:
+        block = {
+            "h2h": game_markets.get("h2h", []),
+            "spread": game_markets.get("spreads", []),
+            "total": game_markets.get("totals", []),
+        }[market]
         best = None
-        for r in blk:
-            price = r.get(f"{side}_price")
-            if mk == "spread" and r.get(f"{side}_point") != line:
+        for row in block:
+            price = row.get(f"{side}_price")
+            if market == "spread" and row.get(f"{side}_point") != line:
                 continue
-            if mk == "total" and r.get("point") != line:
+            if market == "total" and row.get("point") != line:
                 continue
             if isinstance(price, (int, float)):
-                dec = ve.american_to_decimal(price) or 0
-                if best is None or dec > best[0]:
-                    best = (dec, price)
+                decimal = ve.american_to_decimal(price) or 0
+                if best is None or decimal > best[0]:
+                    best = (decimal, price)
         return best[1] if best else None
-    inv = {v: k for k, v in projections.ODDS_KEY_TO_MARKET.items()}
-    want = inv.get(mk)
-    nkey = _norm_name(e.get("player"))
+    inverse = {value: key for key, value in projections.ODDS_KEY_TO_MARKET.items()}
+    wanted = inverse.get(market)
+    normalized = _norm_name(entry.get("player"))
     best = None
-    for r in prop_rows:
-        if (r["base_key"] == want and r["side"] == side and r["line"] == line
-                and _norm_name(r["player"]) == nkey
-                and isinstance(r.get("price"), (int, float))):
-            dec = ve.american_to_decimal(r["price"]) or 0
-            if best is None or dec > best[0]:
-                best = (dec, r["price"])
+    for row in prop_rows:
+        if (
+            row["base_key"] == wanted
+            and row["side"] == side
+            and row["line"] == line
+            and _norm_name(row["player"]) == normalized
+            and isinstance(row.get("price"), (int, float))
+        ):
+            decimal = ve.american_to_decimal(row["price"]) or 0
+            if best is None or decimal > best[0]:
+                best = (decimal, row["price"])
     return best[1] if best else None
 
 
 # ----------------------------------------------------------------- live pace
 
 def live_status() -> dict:
-    """Live pace for pending picks whose games are in progress: current stat
-    value vs the line, plus live scores. Polled by tracker.html on game days."""
+    """Live pace for pending picks whose games are in progress."""
     store = _load()
-    pend = [e for day in store.values() for e in day.get("entries", [])
-            if e.get("grade") == "pending" and e.get("gameId")]
-    if not pend:
+    pending = [
+        entry for day in store.values() for entry in day.get("entries", [])
+        if entry.get("grade") == "pending" and entry.get("gameId")
+    ]
+    if not pending:
         return {"live": False, "picks": []}
-    seasons = {int(e.get("season") or nfl_data.default_season()) for e in pend}
+    seasons = {int(entry.get("season") or nfl_data.default_season()) for entry in pending}
     games: dict[str, dict] = {}
     for season in seasons:
-        cw = nfl_data.current_week(season)
-        for g in nfl_data.fetch_week_scoreboard(season, cw["week"],
-                                                2 if cw["season_type"] == "REG" else 3):
-            games[g["game_id"]] = g
+        current = nfl_data.current_week(season)
+        for game in nfl_data.fetch_week_scoreboard(
+            season,
+            current["week"],
+            2 if current["season_type"] == "REG" else 3,
+        ):
+            games[game["game_id"]] = game
     picks = []
     any_live = False
-    for e in pend:
-        g = games.get(e["gameId"])
-        if not g or g["state"] == "pre":
+    for entry in pending:
+        game = games.get(entry["gameId"])
+        if not game or game["state"] == "pre":
             continue
-        if g["state"] == "in":
+        if game["state"] == "in":
             any_live = True
-        item = {"id": e["id"], "player": e.get("player"),
-                "marketKey": e.get("marketKey"), "line": e.get("line"),
-                "side": e.get("side"), "state": g["state"],
-                "detail": g.get("status_detail"),
-                "score": f"{g['away_team']} {g['away_score'] or 0} - "
-                         f"{g['home_team']} {g['home_score'] or 0}"}
-        if e["marketKey"] in GAME_MARKETS:
-            hs, as_ = g.get("home_score") or 0, g.get("away_score") or 0
-            item["current"] = (hs + as_ if e["marketKey"] == "total"
-                               else (hs if e.get("side") == "home" else as_))
+        item = {
+            "id": entry["id"],
+            "player": entry.get("player"),
+            "marketKey": entry.get("marketKey"),
+            "line": entry.get("line"),
+            "side": entry.get("side"),
+            "state": game["state"],
+            "detail": game.get("status_detail"),
+            "score": (
+                f"{game['away_team']} {game['away_score'] or 0} - "
+                f"{game['home_team']} {game['home_score'] or 0}"
+            ),
+        }
+        if entry["marketKey"] in GAME_MARKETS:
+            home_score, away_score = game.get("home_score") or 0, game.get("away_score") or 0
+            item["current"] = (
+                home_score + away_score
+                if entry["marketKey"] == "total"
+                else (home_score if entry.get("side") == "home" else away_score)
+            )
         else:
-            row = next((r for r in nfl_data.live_game_stats(g)
-                        if r["player_id"] == str(e.get("playerId"))), None)
+            row = next(
+                (
+                    stat for stat in nfl_data.live_game_stats(game)
+                    if stat["player_id"] == str(entry.get("playerId"))
+                ),
+                None,
+            )
             if row:
-                if e["marketKey"] == "anytime_td":
+                if entry["marketKey"] == "anytime_td":
                     item["current"] = row["rushing_tds"] + row["receiving_tds"]
                 else:
-                    item["current"] = row.get(PROP_STAT.get(e["marketKey"], ""), 0)
+                    item["current"] = row.get(PROP_STAT.get(entry["marketKey"], ""), 0)
             else:
                 item["current"] = 0
-        if isinstance(item.get("current"), (int, float)) and e.get("line") is not None:
-            over = item["current"] > float(e["line"])
-            item["hit"] = over if e.get("side") == "over" else not over
+        if isinstance(item.get("current"), (int, float)) and entry.get("line") is not None:
+            over = item["current"] > float(entry["line"])
+            item["hit"] = over if entry.get("side") == "over" else not over
         picks.append(item)
     return {"live": any_live, "picks": picks}
 
 
 # -------------------------------------------------------------------- summary
 
+def _entry_probability(entry: dict) -> float | None:
+    for key in ("consensusProb", "modelProb"):
+        value = entry.get(key)
+        if isinstance(value, (int, float)):
+            return max(0.0, min(1.0, float(value)))
+    return None
+
+
+def _ece(samples: list[tuple[float, float]], bins: int = 10) -> float | None:
+    if not samples:
+        return None
+    total = len(samples)
+    error = 0.0
+    for index in range(bins):
+        low, high = index / bins, (index + 1) / bins
+        bucket = [
+            sample for sample in samples
+            if low <= sample[0] < high or (index == bins - 1 and sample[0] == 1.0)
+        ]
+        if not bucket:
+            continue
+        mean_probability = sum(item[0] for item in bucket) / len(bucket)
+        mean_outcome = sum(item[1] for item in bucket) / len(bucket)
+        error += len(bucket) / total * abs(mean_probability - mean_outcome)
+    return round(error, 6)
+
+
 def performance_summary() -> dict:
     store = _load()
-    entries = [e for day in store.values() for e in day.get("entries", [])]
-    graded = [e for e in entries if e.get("grade") in ("win", "loss", "push")]
-    wins = sum(1 for e in graded if e["grade"] == "win")
-    losses = sum(1 for e in graded if e["grade"] == "loss")
-    pushes = sum(1 for e in graded if e["grade"] == "push")
-    profit = round(sum(e.get("profitDollars") or 0 for e in graded), 2)
-    staked = sum(float(e.get("stakeDollars") or 0) for e in graded)
-    with_clv = [e for e in entries if isinstance(e.get("clvEdge"), (int, float))]
-    beat = sum(1 for e in with_clv if e["clvEdge"] > 0)
+    entries = [entry for day in store.values() for entry in day.get("entries", [])]
+    graded = [entry for entry in entries if entry.get("grade") in ("win", "loss", "push")]
+    wins = sum(1 for entry in graded if entry["grade"] == "win")
+    losses = sum(1 for entry in graded if entry["grade"] == "loss")
+    pushes = sum(1 for entry in graded if entry["grade"] == "push")
+    profit = round(sum(entry.get("profitDollars") or 0 for entry in graded), 2)
+    staked = sum(float(entry.get("stakeDollars") or 0) for entry in graded)
+    with_clv = [entry for entry in entries if isinstance(entry.get("clvEdge"), (int, float))]
+    beat = sum(1 for entry in with_clv if entry["clvEdge"] > 0)
+    calibration: list[tuple[float, float]] = []
+    briers: list[float] = []
+    for entry in graded:
+        if entry.get("grade") not in {"win", "loss"}:
+            continue
+        probability = _entry_probability(entry)
+        if probability is None:
+            continue
+        outcome = 1.0 if entry["grade"] == "win" else 0.0
+        calibration.append((probability, outcome))
+        briers.append((probability - outcome) ** 2)
+
     per_market: dict[str, dict] = {}
-    for e in graded:
-        m = per_market.setdefault(e.get("marketKey") or "?",
-                                  {"n": 0, "wins": 0, "losses": 0, "pushes": 0,
-                                   "profit": 0.0})
-        m["n"] += 1
-        m[e["grade"] + ("s" if e["grade"] != "loss" else "es")] += 1
-        m["profit"] = round(m["profit"] + (e.get("profitDollars") or 0), 2)
+    for entry in graded:
+        market = per_market.setdefault(
+            entry.get("marketKey") or "?",
+            {"n": 0, "wins": 0, "losses": 0, "pushes": 0, "profit": 0.0},
+        )
+        market["n"] += 1
+        market[entry["grade"] + ("s" if entry["grade"] != "loss" else "es")] += 1
+        market["profit"] = round(market["profit"] + (entry.get("profitDollars") or 0), 2)
     decided = wins + losses
     return {
         "primaryKpi": {
             "metric": "clv",
             "value": round(beat / len(with_clv), 4) if with_clv else None,
-            "avg_clv": round(sum(e["clvEdge"] for e in with_clv) / len(with_clv), 4)
-                       if with_clv else None,
+            "avg_clv": (
+                round(sum(entry["clvEdge"] for entry in with_clv) / len(with_clv), 4)
+                if with_clv else None
+            ),
             "n": len(with_clv),
         },
-        "picks": len(entries), "pending": len(entries) - len(graded),
-        "wins": wins, "losses": losses, "pushes": pushes,
+        "picks": len(entries),
+        "pending": len(entries) - len(graded),
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
         "hit_rate": round(wins / decided, 4) if decided else None,
         "profitDollars": profit,
         "roi": round(profit / staked, 4) if staked else None,
+        "brier": round(sum(briers) / len(briers), 6) if briers else None,
+        "ece": _ece(calibration),
+        "calibrationSamples": len(calibration),
+        "receiptCoverage": round(
+            sum(bool(entry.get("releaseFingerprint")) for entry in entries) / len(entries), 4
+        ) if entries else 1.0,
         "per_market": per_market,
         "settings": get_settings(),
+        "persistence": persistence_status(),
     }
 
 
@@ -494,18 +650,23 @@ def start_background_workers() -> None:
             time.sleep(AUTO_SYNC_MIN * 60)
             try:
                 grade_pending()
-            except Exception as e:  # noqa: BLE001
-                print(f"[tracker] grade loop: {e}")
+                # Import here to avoid creating a circular dependency during app
+                # registration. Publication receipts are graded alongside user
+                # tracked picks, but their release payload remains immutable.
+                import decision_ledger
+
+                decision_ledger.grade_pending()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[tracker] grade loop: {exc}")
 
     def _closing_loop():
         while True:
             time.sleep(CLOSING_INTERVAL_MIN * 60)
             try:
                 closing_capture_once()
-            except Exception as e:  # noqa: BLE001
-                print(f"[tracker] closing loop: {e}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[tracker] closing loop: {exc}")
 
     threading.Thread(target=_grade_loop, daemon=True, name="tracker-grade").start()
     if CLOSING_ENABLED:
-        threading.Thread(target=_closing_loop, daemon=True,
-                         name="tracker-closing").start()
+        threading.Thread(target=_closing_loop, daemon=True, name="tracker-closing").start()
