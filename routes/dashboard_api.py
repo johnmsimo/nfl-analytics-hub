@@ -1,4 +1,4 @@
-"""Aggregated payload for the AI Intelligence dashboard."""
+"""Aggregated payload for the AI Intelligence dashboard and P3.5 My Hub delivery."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from flask import Blueprint, jsonify, request
 
+import decision_delivery as dd
 import nfl_data
 import odds_api
 from routes.games import game_lines
@@ -79,8 +80,6 @@ def _game_prediction(game: dict, teams: dict, lines: dict) -> dict:
             "factors": [],
             "market": lines,
         }
-    # Modest home-field adjustment. This is explicitly a transparent heuristic,
-    # not a trained model, and is presented as an analytic estimate.
     logit = (hp - ap + 2.2) / 11.5
     home_prob = 1 / (1 + math.exp(-logit))
     confidence = _clamp(0.58 + abs(home_prob - 0.5) * 0.7, 0.58, 0.94)
@@ -143,55 +142,59 @@ def _status(available: int, expected: int | None = None) -> str:
     return "ready"
 
 
-def _reason(code: str, message: str) -> dict:
-    return {"code": code, "message": message}
+def _reason(code: str, message: str | None) -> dict:
+    return {"code": code, "message": message or code.replace("_", " ")}
 
 
-@dashboard_bp.route("/api/dashboard")
-def api_dashboard():
-    cw = nfl_data.current_week()
-    season = int(request.args.get("season", cw["season"]))
-    week = int(request.args.get("week", cw["week"]))
-    stype = request.args.get("type", cw.get("season_type", "REG"))
+def _dashboard_payload(season: int, week: int, stype: str) -> dict:
     ss = nfl_data.stats_season(season)
     games = nfl_data.get_week_games(season, week, stype)
     teams = nfl_data.team_summaries(ss)
 
     rankings = [
-        {
-            **row,
-            "power_score": _team_power(row),
-            "point_diff": _point_diff(row),
-        }
+        {**row, "power_score": _team_power(row), "point_diff": _point_diff(row)}
         for row in teams.values()
     ]
     rankings.sort(key=lambda row: (row["power_score"] is None, -(row["power_score"] or 0)))
     valid_team_count = sum(row["power_score"] is not None for row in rankings)
 
     predictions = []
-    projection_rows = []
+    projection_rows: list[dict] = []
     projection_errors = 0
     market_errors = 0
     odds_configured = odds_api.is_configured()
-    for game in games[:8]:
+    evaluated_games = games[:8]
+    for game in evaluated_games:
         if odds_configured:
             try:
                 lines = game_lines(game)
             except Exception:  # noqa: BLE001 - dashboard degrades without provider details
                 market_errors += 1
-                lines = {"available": False, "status": "degraded", "reason": "Market provider unavailable"}
+                lines = {
+                    "available": False,
+                    "status": "degraded",
+                    "reason": "Market provider unavailable",
+                }
         else:
-            lines = {"available": False, "status": "unavailable", "reason": "Odds provider is not configured"}
+            lines = {
+                "available": False,
+                "status": "unavailable",
+                "reason": "Odds provider is not configured",
+            }
         predictions.append(_game_prediction(game, teams, lines))
         try:
             projection_rows.extend(_build_game_rows(game, season))
-        except Exception:  # noqa: BLE001 - record the degraded component explicitly
+        except Exception:  # noqa: BLE001 - delivery state reports the failed game
             projection_errors += 1
 
-    projection_rows.sort(
-        key=lambda r: (r.get("edge") is None, -(r.get("edge") or 0), -(r.get("modelProb") or 0))
+    projection_rows = dd.sort_decisions(projection_rows)
+    quick_props = dd.build_delivery(
+        projection_rows,
+        limit=8,
+        game_errors=projection_errors,
+        expected_games=len(evaluated_games),
     )
-    top_players = projection_rows[:8]
+    top_players = quick_props["picks"] or quick_props["watchlist"]
     ready_predictions = [p for p in predictions if p["status"] == "ready"]
     featured = ready_predictions[0] if ready_predictions else None
     priced_edges = [r["edge"] for r in projection_rows if _is_number(r.get("edge"))]
@@ -229,6 +232,12 @@ def api_dashboard():
                 if projection_errors
                 else (None if projection_rows else "No qualifying player projection data is available.")
             ),
+        },
+        "quick_props": {
+            "status": quick_props["state"],
+            "available_count": quick_props["summary"]["delivered"],
+            "watchlist_count": len(quick_props["watchlist"]),
+            "message": quick_props["message"],
         },
         "market_pricing": {
             "status": (
@@ -304,40 +313,64 @@ def api_dashboard():
         },
     }
 
-    return jsonify(
-        {
-            "season": season,
-            "week": week,
-            "season_type": stype,
-            "stats_season": ss,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "kpis": {
-                "win_probability": featured["home_prob"] if featured else None,
-                "prediction_confidence": featured["confidence"] if featured else None,
-                "upside_score": round(max(0, market_edge) * 100, 1) if market_edge is not None else None,
-                "projected_points": featured["projected_home"] if featured else None,
-                "market_edge": round(market_edge, 4) if market_edge is not None else None,
-                "injury_impact": None,
-            },
-            "kpi_status": kpi_status,
-            "featured": featured,
-            "upcoming_games": predictions[:5],
-            "player_projections": top_players,
-            "team_rankings": rankings[:10],
-            "trend": [],
-            "data_status": {"status": overall_status, "reasons": reasons, "components": components},
-            "engine": {
-                "status": overall_status,
-                "version": "Analytics v1.1",
-                "data_coverage": round(min(valid_team_count / 32, 1.0), 3),
-                "covered_team_count": valid_team_count,
-                "expected_team_count": 32,
-                "coverage_status": "complete"
-                if valid_team_count >= 32
-                else ("partial" if valid_team_count else "empty"),
-                "source_chain": ["nflverse", "espn"],
-                "odds_configured": odds_configured,
-                "model_note": "Estimates render only when required source data is available. Missing inputs are reported as unavailable or degraded; placeholder statistics are never substituted.",
-            },
-        }
-    )
+    return {
+        "season": season,
+        "week": week,
+        "season_type": stype,
+        "stats_season": ss,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "kpis": {
+            "win_probability": featured["home_prob"] if featured else None,
+            "prediction_confidence": featured["confidence"] if featured else None,
+            "upside_score": round(max(0, market_edge) * 100, 1) if market_edge is not None else None,
+            "projected_points": featured["projected_home"] if featured else None,
+            "market_edge": round(market_edge, 4) if market_edge is not None else None,
+            "injury_impact": None,
+        },
+        "kpi_status": kpi_status,
+        "featured": featured,
+        "upcoming_games": predictions[:5],
+        "player_projections": top_players[:8],
+        "quick_props": quick_props,
+        "team_rankings": rankings[:10],
+        "trend": [],
+        "data_status": {"status": overall_status, "reasons": reasons, "components": components},
+        "engine": {
+            "status": overall_status,
+            "version": "P3.5 Decision Delivery",
+            "data_coverage": round(min(valid_team_count / 32, 1.0), 3),
+            "covered_team_count": valid_team_count,
+            "expected_team_count": 32,
+            "coverage_status": "complete"
+            if valid_team_count >= 32
+            else ("partial" if valid_team_count else "empty"),
+            "source_chain": ["nflverse", "espn"],
+            "odds_configured": odds_configured,
+            "model_note": (
+                "Quick Props is delivered from the P3.4 decision engine. Lean-or-better model picks "
+                "surface even when unpriced; Pass rows are watchlist-only and verified price/EV is "
+                "required before a model pick becomes actionable."
+            ),
+        },
+    }
+
+
+@dashboard_bp.route("/api/dashboard")
+def api_dashboard():
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = request.args.get("type", cw.get("season_type", "REG"))
+    return jsonify(_dashboard_payload(season, week, stype))
+
+
+@dashboard_bp.route("/api/my-hub")
+def api_my_hub():
+    """Canonical My Hub payload; shares the exact Dashboard decision contract."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = request.args.get("type", cw.get("season_type", "REG"))
+    payload = _dashboard_payload(season, week, stype)
+    payload["surface"] = "my-hub"
+    return jsonify(payload)
