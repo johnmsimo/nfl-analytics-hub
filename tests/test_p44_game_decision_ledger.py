@@ -140,7 +140,7 @@ def test_grade_pending_and_performance(app_fixture, monkeypatch):
             [
                 _pick("moneyline", side="home", price=-110),
                 _pick("spread", side="away", line=3.5, price=100),
-                _pick("total", side="over", line=47.0, price=105),
+                _pick("total", side="over", line=44.5, price=105),
             ]
         )
         monkeypatch.setattr(
@@ -150,8 +150,8 @@ def test_grade_pending_and_performance(app_fixture, monkeypatch):
                 {
                     "game_id": "p44-game",
                     "completed": True,
-                    "home_score": 27,
-                    "away_score": 20,
+                    "home_score": 24,
+                    "away_score": 21,
                 }
             ],
         )
