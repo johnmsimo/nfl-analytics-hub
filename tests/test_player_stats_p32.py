@@ -5,6 +5,7 @@ from pathlib import Path
 
 import player_stats_warehouse
 import projection_data
+import projection_readiness
 from database import db
 from db_models import Player, PlayerTeamSeason, Season, Team
 
@@ -132,7 +133,44 @@ def test_current_stat_refresh_refreshes_schedule_first(tmp_path, monkeypatch):
     assert result["written"] == 1
 
 
-def test_readiness_gate_requires_current_and_projection_evidence(monkeypatch):
+def test_projection_readiness_separates_returning_and_cold_start_players(monkeypatch):
+    monkeypatch.setattr(projection_readiness.pd, "stats_season", lambda season: 2025)
+    monkeypatch.setattr(
+        projection_readiness.pd,
+        "player_game_logs",
+        lambda season: {
+            "a": [{}, {}, {}, {}, {}],
+            "b": [{}, {}],
+            "d": [{}, {}, {}],
+        },
+    )
+    monkeypatch.setattr(
+        projection_readiness.pd,
+        "player_index",
+        lambda target, evidence: {
+            "a": {"position": "QB", "rosterVerified": True},
+            "b": {"position": "WR", "rosterVerified": True},
+            "c": {"position": "RB", "rosterVerified": True},
+            "d": {"position": "TE", "rosterVerified": True},
+            "x": {"position": "CB", "rosterVerified": True},
+        },
+    )
+    monkeypatch.setattr(
+        projection_readiness.pd,
+        "regular_weeks_with_stats",
+        lambda season: [],
+    )
+
+    snapshot = projection_readiness.projection_pool_snapshot(2026)
+    assert snapshot["current_skill_players"] == 4
+    assert snapshot["returning_skill_players"] == 3
+    assert snapshot["cold_start_skill_players"] == 1
+    assert snapshot["projection_ready_skill_players"] == 2
+    assert snapshot["projection_ready_skill_coverage"] == 0.5
+    assert snapshot["projection_ready_returning_skill_coverage"] == 0.6667
+
+
+def test_readiness_gate_uses_returning_player_coverage(monkeypatch):
     baseline = {
         "season": 2025,
         "player_game_rows": 5000,
@@ -149,6 +187,57 @@ def test_readiness_gate_requires_current_and_projection_evidence(monkeypatch):
         "regular_weeks": [],
         "player_season_rows": 180,
     }
+    projection = {
+        "target_season": 2026,
+        "evidence_season": 2025,
+        "current_skill_players": 995,
+        "returning_skill_players": 540,
+        "cold_start_skill_players": 455,
+        "projection_ready_skill_players": 462,
+        "projection_ready_skill_coverage": 0.4643,
+        "projection_ready_returning_skill_coverage": 0.8556,
+    }
+    monkeypatch.setattr(
+        player_stats_warehouse,
+        "_season_fact_snapshot",
+        lambda season: baseline if season == 2025 else current,
+    )
+    monkeypatch.setattr(
+        player_stats_warehouse,
+        "projection_pool_snapshot",
+        lambda season: projection,
+    )
+
+    result = player_stats_warehouse.player_stats_readiness_snapshot(2026, 2025)
+    assert result["ok"] is True
+    assert result["gates"]["projection_ready_coverage"] is True
+    assert result["thresholds"]["projection_ready_coverage_denominator"] == (
+        "returning_current_skill_players"
+    )
+
+    projection["projection_ready_returning_skill_coverage"] = 0.49
+    result = player_stats_warehouse.player_stats_readiness_snapshot(2026, 2025)
+    assert result["ok"] is False
+    assert result["gates"]["projection_ready_coverage"] is False
+
+
+def test_readiness_gate_requires_current_evidence(monkeypatch):
+    baseline = {
+        "season": 2025,
+        "player_game_rows": 5000,
+        "players_with_stats": 600,
+        "games_with_player_stats": 285,
+        "regular_weeks": list(range(1, 19)),
+        "player_season_rows": 500,
+    }
+    current = {
+        "season": 2026,
+        "player_game_rows": 99,
+        "players_with_stats": 80,
+        "games_with_player_stats": 8,
+        "regular_weeks": [],
+        "player_season_rows": 80,
+    }
     monkeypatch.setattr(
         player_stats_warehouse,
         "_season_fact_snapshot",
@@ -161,14 +250,10 @@ def test_readiness_gate_requires_current_and_projection_evidence(monkeypatch):
             "target_season": season,
             "evidence_season": 2025,
             "projection_ready_skill_players": 300,
-            "projection_ready_skill_coverage": 0.60,
+            "projection_ready_skill_coverage": 0.45,
+            "projection_ready_returning_skill_coverage": 0.75,
         },
     )
-    result = player_stats_warehouse.player_stats_readiness_snapshot(2026, 2025)
-    assert result["ok"] is True
-    assert all(result["gates"].values())
-
-    current["player_game_rows"] = 99
     result = player_stats_warehouse.player_stats_readiness_snapshot(2026, 2025)
     assert result["ok"] is False
     assert result["gates"]["current_completed_game_evidence"] is False

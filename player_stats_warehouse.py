@@ -22,7 +22,7 @@ from analytics_warehouse import rebuild_player_seasons
 from data_ingestion import import_player_week, import_schedule
 from database import db
 from db_models import DataSyncRun, Game, PlayerGameStat, PlayerSeasonStat
-from projection_data import projection_pool_snapshot
+from projection_readiness import projection_pool_snapshot
 from source_registry import clear_raw_cache, prime_raw_cache, register_source
 
 
@@ -175,7 +175,9 @@ def player_stats_readiness_snapshot(target_season: int, baseline_season: int) ->
         "current_completed_game_evidence": current["player_game_rows"] >= min_current_rows,
         "player_season_aggregates": baseline["player_season_rows"] >= min_season_rows,
         "projection_ready_player_pool": projection["projection_ready_skill_players"] >= min_ready_players,
-        "projection_ready_coverage": projection["projection_ready_skill_coverage"] >= min_ready_coverage,
+        "projection_ready_coverage": (
+            projection["projection_ready_returning_skill_coverage"] >= min_ready_coverage
+        ),
     }
     return {
         "target_season": target_season,
@@ -189,6 +191,7 @@ def player_stats_readiness_snapshot(target_season: int, baseline_season: int) ->
             "minimum_current_rows": min_current_rows,
             "minimum_ready_skill_players": min_ready_players,
             "minimum_ready_skill_coverage": min_ready_coverage,
+            "projection_ready_coverage_denominator": "returning_current_skill_players",
             "minimum_player_season_rows": min_season_rows,
         },
         "gates": gates,
