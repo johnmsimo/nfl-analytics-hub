@@ -214,9 +214,15 @@ def find_event_for_game(game: dict, *, cache_only: bool = False, force: bool = F
     """Match an ESPN game to an Odds API event.
 
     ``cache_only=True`` is the zero-credit P3.6 verification/product fallback.
-    The default remains backward compatible with prior callers.
+    The default keeps the historical zero-argument ``get_game_odds()`` call
+    contract; only an explicit forced refresh passes the new keyword argument.
     """
-    events = peek_game_odds() if cache_only else get_game_odds(force=force)
+    if cache_only:
+        events = peek_game_odds()
+    elif force:
+        events = get_game_odds(force=True)
+    else:
+        events = get_game_odds()
     return _match_event(game, events)
 
 
