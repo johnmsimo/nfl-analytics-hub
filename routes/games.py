@@ -1,13 +1,8 @@
 """
 Game routes: weekly slate, single-game detail, P4.0 model decisions, P4.1
 sportsbook actionability, P4.2 durable hydrated market board, P4.3 decision-first
-delivery, P4.4 immutable game-publication receipts, and market-relative boards.
-
-P4.0 owns independent game probabilities. P4.1 joins those probabilities to
-verified sportsbook prices. P4.2 serves an explicitly hydrated, durable weekly
-market snapshot without spending provider credits on ordinary product reads.
-P4.3 transforms that persisted board for user-facing decision surfaces. P4.4
-records the first published actionable version without changing actionability.
+delivery, P4.4 immutable game-publication receipts, P4.5 smart market freshness,
+and market-relative boards.
 """
 from __future__ import annotations
 
@@ -22,6 +17,7 @@ import p41_game_market_pricing
 import p42_live_market_hydration
 import p43_game_decision_delivery
 import p44_game_decision_ledger
+import p45_smart_market_refresh
 import value_engine as ve
 
 games_bp = Blueprint("games", __name__)
@@ -42,8 +38,6 @@ def _consensus(fairs: list[float]) -> float | None:
 
 def _two_way_board(rows: list[dict], a_key: str, b_key: str,
                    a_price: str, b_price: str) -> dict:
-    """Generic two-way market rollup: per-book devig, consensus fair prob for
-    side A, best price each side with EV vs consensus."""
     books, fairs_a = [], []
     for r in rows:
         pa, pb = r.get(a_price), r.get(b_price)
@@ -78,7 +72,6 @@ def _majority_point(rows: list[dict], key: str):
 
 
 def game_lines(game: dict) -> dict:
-    """Full line board for one schedule game (empty shells without odds)."""
     ev = odds_api.find_event_for_game(game)
     if not ev:
         return {"available": False}
@@ -130,7 +123,6 @@ def api_week():
 
 @games_bp.route("/api/game-decisions/week")
 def api_game_decisions_week():
-    """P4.0 model-only moneyline decisions; performs zero Odds API calls."""
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
     week = int(request.args.get("week", cw["week"]))
@@ -142,12 +134,6 @@ def api_game_decisions_week():
 
 @games_bp.route("/api/game-market-decisions/week")
 def api_game_market_decisions_week():
-    """P4.1 priced game decisions for moneyline, spread, and total markets.
-
-    pricing=cache is zero-credit, pricing=auto uses the normal provider TTL,
-    pricing=live explicitly force-refreshes one shared game-odds snapshot, and
-    pricing=off returns model decisions without sportsbook prices.
-    """
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
     week = int(request.args.get("week", cw["week"]))
@@ -157,19 +143,12 @@ def api_game_market_decisions_week():
         return jsonify({"error": "invalid season type"}), 400
     if pricing not in {"off", "cache", "auto", "live"}:
         return jsonify({"error": "invalid pricing mode"}), 400
-    return jsonify(
-        p41_game_market_pricing.build_week_market_report(
-            season,
-            week,
-            stype,
-            pricing_mode=pricing,
-        )
-    )
+    return jsonify(p41_game_market_pricing.build_week_market_report(
+        season, week, stype, pricing_mode=pricing))
 
 
 @games_bp.route("/api/game-market-board/week")
 def api_game_market_board_week():
-    """P4.2 cache-only board; My Hub reads also trigger idempotent P4.4 publication."""
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
     week = int(request.args.get("week", cw["week"]))
@@ -192,21 +171,37 @@ def api_game_market_board_week():
 
 @games_bp.route("/api/game-decision-board/week")
 def api_game_decision_board_week():
-    """P4.3 delivery plus P4.4 first-publication receipts; zero Odds API spend."""
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
     week = int(request.args.get("week", cw["week"]))
     stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
     if stype not in {"PRE", "REG", "POST"}:
         return jsonify({"error": "invalid season type"}), 400
-    return jsonify(
-        p44_game_decision_ledger.publish_week_delivery(season, week, stype)
-    )
+    return jsonify(p44_game_decision_ledger.publish_week_delivery(season, week, stype))
+
+
+@games_bp.route("/api/game-opportunities/week")
+def api_game_opportunities_week():
+    """P4.5 cache-only continuity board; never upgrades P4.1 actionability."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(p45_smart_market_refresh.build_week_opportunities(season, week, stype))
+
+
+@games_bp.route("/api/game-market-refresh/status")
+def api_game_market_refresh_status():
+    """P4.5 scheduler lease status; performs zero provider requests."""
+    season = request.args.get("season")
+    return jsonify(p45_smart_market_refresh.refresh_status(
+        int(season) if season not in (None, "") else None))
 
 
 @games_bp.route("/api/game-market-hydration/status")
 def api_game_market_hydration_status():
-    """Sanitized P4.2 cache status; performs zero provider requests."""
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
     week = int(request.args.get("week", cw["week"]))

@@ -47,6 +47,12 @@ JOBS = {
     "analytics-rebuild": {"name": "Warehouse aggregate rebuild", "minutes": 60},
     "quality-checks": {"name": "Data quality checks", "minutes": 60},
     "game-decision-grading": {"name": "Game decision grading", "minutes": 30},
+    "game-market-refresh": {
+        "name": "Smart game-market refresh",
+        "minutes": 5,
+        "minutes_env": "P45_SCHEDULER_TICK_MINUTES",
+        "enabled_envs": ("ENABLE_GAME_MARKET_REFRESH",),
+    },
     "warehouse-retention": {
         "name": "Warehouse retention",
         "minutes": 1440,
@@ -194,14 +200,18 @@ def run_job(app, key):
             row.last_started_at = datetime.now(timezone.utc)
             db.session.commit()
 
-        is_provider = "provider_family" in JOBS[key]
-        uses_warehouse_lock = is_provider or key == "warehouse-retention"
-        if uses_warehouse_lock and not _PROVIDER_SYNC_LOCK.acquire(blocking=False):
-            reason = (
-                "another provider sync is already running"
-                if is_provider
-                else "another provider sync or retention run is already running"
-            )
+        is_provider_job = "provider_family" in JOBS[key]
+        uses_provider_lock = is_provider_job or key in {
+            "warehouse-retention",
+            "game-market-refresh",
+        }
+        if uses_provider_lock and not _PROVIDER_SYNC_LOCK.acquire(blocking=False):
+            if is_provider_job:
+                reason = "another provider sync is already running"
+            elif key == "warehouse-retention":
+                reason = "another provider sync or retention run is already running"
+            else:
+                reason = "another provider sync or protected provider task is already running"
             _record(key, "skipped", reason)
             app.logger.warning("scheduled job %s skipped: %s", key, reason)
             return
@@ -222,6 +232,16 @@ def run_job(app, key):
                 from p44_game_decision_ledger import grade_pending
 
                 grade_pending()
+            elif key == "game-market-refresh":
+                from p45_smart_market_refresh import refresh_next_slate
+
+                result = refresh_next_slate(allow_provider_spend=True)
+                app.logger.info(
+                    "P4.5 market refresh action=%s state=%s provider_requests=%s",
+                    result.get("action"),
+                    result.get("state"),
+                    result.get("providerRequests", 0),
+                )
             elif key == "warehouse-retention":
                 from warehouse_retention import apply_warehouse_retention
 
@@ -233,7 +253,7 @@ def run_job(app, key):
             _record(key, "failed", str(exc))
             app.logger.exception("scheduled job %s failed", key)
         finally:
-            if uses_warehouse_lock:
+            if uses_provider_lock:
                 _PROVIDER_SYNC_LOCK.release()
 
 
