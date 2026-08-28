@@ -8,9 +8,10 @@ hydration command is allowed to spend provider credits.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
-import time
 from collections import Counter
+from datetime import UTC, datetime
+import os
+import time
 from typing import Any, Iterable
 
 import nfl_data
@@ -39,14 +40,19 @@ def _nickname(value: Any) -> str:
     return parts[-1] if parts else ""
 
 
-def _match_event(game: dict[str, Any], events: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
+def _match_event(
+    game: dict[str, Any], events: Iterable[dict[str, Any]]
+) -> dict[str, Any] | None:
     """Match schedule and provider events without requiring provider IDs in schedule."""
     home_name = _norm(game.get("home_name"))
     away_name = _norm(game.get("away_name"))
     rows = list(events)
     if home_name and away_name:
         for event in rows:
-            if _norm(event.get("home_team")) == home_name and _norm(event.get("away_team")) == away_name:
+            if (
+                _norm(event.get("home_team")) == home_name
+                and _norm(event.get("away_team")) == away_name
+            ):
                 return event
 
     home_nick = _nickname(game.get("home_name"))
@@ -54,7 +60,10 @@ def _match_event(game: dict[str, Any], events: Iterable[dict[str, Any]]) -> dict
     if not home_nick or not away_nick:
         return None
     for event in rows:
-        if _nickname(event.get("home_team")) == home_nick and _nickname(event.get("away_team")) == away_nick:
+        if (
+            _nickname(event.get("home_team")) == home_nick
+            and _nickname(event.get("away_team")) == away_nick
+        ):
             return event
     return None
 
@@ -70,7 +79,9 @@ def _event_has_game_markets(event: dict[str, Any] | None) -> bool:
     )
 
 
-def _merge_event_metadata(catalog_event: dict[str, Any], odds_event: dict[str, Any]) -> dict[str, Any]:
+def _merge_event_metadata(
+    catalog_event: dict[str, Any], odds_event: dict[str, Any]
+) -> dict[str, Any]:
     merged = dict(catalog_event)
     merged.update(odds_event)
     if not merged.get("id"):
@@ -90,14 +101,18 @@ def _load_root() -> dict[str, Any]:
     return dict(root) if isinstance(root, dict) else {"weeks": {}}
 
 
-def _load_week_snapshot(season: int, week: int, season_type: str) -> dict[str, Any] | None:
+def _load_week_snapshot(
+    season: int, week: int, season_type: str
+) -> dict[str, Any] | None:
     root = _load_root()
     weeks = root.get("weeks") if isinstance(root.get("weeks"), dict) else {}
     payload = weeks.get(_week_key(season, week, season_type))
     return dict(payload) if isinstance(payload, dict) else None
 
 
-def _save_week_snapshot(season: int, week: int, season_type: str, payload: dict[str, Any]) -> bool:
+def _save_week_snapshot(
+    season: int, week: int, season_type: str, payload: dict[str, Any]
+) -> bool:
     root = _load_root()
     weeks = root.get("weeks") if isinstance(root.get("weeks"), dict) else {}
     weeks = dict(weeks)
@@ -108,7 +123,11 @@ def _save_week_snapshot(season: int, week: int, season_type: str, payload: dict[
     return provider_cache_store.save_snapshot(CACHE_PROVIDER_KEY, {"game_odds": root})
 
 
-def cache_status(season: int | None = None, week: int | None = None, season_type: str = "REG") -> dict[str, Any]:
+def cache_status(
+    season: int | None = None,
+    week: int | None = None,
+    season_type: str = "REG",
+) -> dict[str, Any]:
     root = _load_root()
     weeks = root.get("weeks") if isinstance(root.get("weeks"), dict) else {}
     selected = None
@@ -129,13 +148,28 @@ def cache_status(season: int | None = None, week: int | None = None, season_type
 
 
 def _provider_catalog() -> list[dict[str, Any]]:
-    """Fetch the provider event catalog.
-
-    This intentionally uses the same configured provider gate as odds_api. The
-    catalog is used only during an explicit live hydration command.
-    """
+    """Fetch the provider event catalog only during explicit live hydration."""
     data = odds_api._get(f"/sports/{odds_api.SPORT}/events")  # noqa: SLF001
     return list(data) if isinstance(data, list) else []
+
+
+def _targeted_game_odds(event_id: str) -> dict[str, Any] | None:
+    """Fetch game markets without touching the shared player-prop event cache.
+
+    ``odds_api.fetch_event_odds_live`` intentionally persists its response into
+    the event-props cache because the closing-line tracker needs a combined
+    props/game snapshot. P4.2 requests only game markets, so using that helper
+    would risk replacing a richer player-prop snapshot with a game-only payload.
+    This targeted path therefore calls the guarded provider client directly and
+    persists only into P4.2's dedicated weekly cache.
+    """
+    data = odds_api._get(  # noqa: SLF001
+        f"/sports/{odds_api.SPORT}/events/{event_id}/odds",
+        regions=os.environ.get("ODDS_REGION", "us"),
+        markets=",".join(GAME_MARKETS),
+        oddsFormat="american",
+    )
+    return dict(data) if isinstance(data, dict) else None
 
 
 def hydrate_week(
@@ -211,7 +245,9 @@ def hydrate_week(
             event_by_game[game_id] = match
             source_by_game[game_id] = "bulk"
 
-    unmatched = [game for game in games if str(game.get("game_id")) not in event_by_game]
+    unmatched = [
+        game for game in games if str(game.get("game_id")) not in event_by_game
+    ]
     catalog: list[dict[str, Any]] = []
     targeted_requests = 0
     catalog_matched = 0
@@ -229,10 +265,7 @@ def hydrate_week(
             catalog_matched += 1
             targeted_requests += 1
             provider_requests += 1
-            odds_event = odds_api.fetch_event_odds_live(
-                str(catalog_event["id"]),
-                markets=GAME_MARKETS,
-            )
+            odds_event = _targeted_game_odds(str(catalog_event["id"]))
             if not isinstance(odds_event, dict):
                 continue
             merged = _merge_event_metadata(catalog_event, odds_event)
@@ -245,7 +278,9 @@ def hydrate_week(
     hydrated_at_epoch = time.time()
     hydrated_at = datetime.fromtimestamp(hydrated_at_epoch, UTC).isoformat()
     market_ready_games = [
-        game_id for game_id, event in event_by_game.items() if _event_has_game_markets(event)
+        game_id
+        for game_id, event in event_by_game.items()
+        if _event_has_game_markets(event)
     ]
     missing_games = [
         {
@@ -275,7 +310,8 @@ def hydrate_week(
         "targetedWithMarkets": targeted_with_markets,
         "catalogMatched": catalog_matched,
         "gameEventIds": {
-            game_id: str(event.get("id") or "") for game_id, event in event_by_game.items()
+            game_id: str(event.get("id") or "")
+            for game_id, event in event_by_game.items()
         },
         "sourceByGame": source_by_game,
         "events": list(event_by_game.values()),
@@ -300,7 +336,9 @@ def hydrate_week(
     }
 
 
-def build_cached_week_board(season: int, week: int, season_type: str = "REG") -> dict[str, Any]:
+def build_cached_week_board(
+    season: int, week: int, season_type: str = "REG"
+) -> dict[str, Any]:
     """Build the user-facing game board from the durable P4.2 cache only."""
     stype = str(season_type).upper()
     snapshot = _load_week_snapshot(int(season), int(week), stype)
@@ -343,7 +381,11 @@ def build_cached_week_board(season: int, week: int, season_type: str = "REG") ->
         for event in snapshot.get("events", [])
         if isinstance(event, dict) and event.get("id")
     }
-    game_event_ids = snapshot.get("gameEventIds") if isinstance(snapshot.get("gameEventIds"), dict) else {}
+    game_event_ids = (
+        snapshot.get("gameEventIds")
+        if isinstance(snapshot.get("gameEventIds"), dict)
+        else {}
+    )
     fetched_at = snapshot.get("hydratedAtEpoch")
     rows: list[dict[str, Any]] = []
     for decision in model_report.get("decisions", []):
@@ -353,7 +395,11 @@ def build_cached_week_board(season: int, week: int, season_type: str = "REG") ->
             p41.price_game_decision(
                 decision,
                 event,
-                fetched_at=float(fetched_at) if isinstance(fetched_at, (int, float)) else None,
+                fetched_at=(
+                    float(fetched_at)
+                    if isinstance(fetched_at, (int, float))
+                    else None
+                ),
             )
         )
 
@@ -375,7 +421,9 @@ def build_cached_week_board(season: int, week: int, season_type: str = "REG") ->
     actionable_markets = Counter(
         market_key for market_key, market in market_rows if market.get("actionable")
     )
-    priced = [row for row in rows if row.get("marketStatus") in {"fresh", "stale"}]
+    priced = [
+        row for row in rows if row.get("marketStatus") in {"fresh", "stale"}
+    ]
     fresh_priced = [row for row in rows if row.get("marketStatus") == "fresh"]
     actionable = [row for row in rows if row.get("actionable")]
     hydration_age = None
@@ -428,12 +476,16 @@ def verify_board(board: dict[str, Any]) -> dict[str, Any]:
     fresh_priced = int(board.get("freshPricedGameCount") or 0)
     actionable = int(board.get("actionableGameCount") or 0)
     gates = {
-        "decision_coverage": int(board.get("decisionCount") or 0) == int(board.get("gameCount") or 0),
+        "decision_coverage": int(board.get("decisionCount") or 0)
+        == int(board.get("gameCount") or 0),
         "real_priced_market_present": priced >= 1,
         "fresh_real_market_present": fresh_priced >= 1,
         "actionable_count_bounded": 0 <= actionable <= priced,
         "pricing_actionability_integrity": pricing_audit.get("ok") is True,
-        "cache_only_product_contract": (board.get("safety") or {}).get("cacheOnlyProductReads") is True,
+        "cache_only_product_contract": (board.get("safety") or {}).get(
+            "cacheOnlyProductReads"
+        )
+        is True,
     }
     return {
         "ok": all(gates.values()),
