@@ -1,12 +1,13 @@
 """
 Game routes: weekly slate, single-game detail, P4.0 model decisions, P4.1
-sportsbook actionability, P4.2 durable hydrated market board, and market-relative
-line boards.
+sportsbook actionability, P4.2 durable hydrated market board, P4.3 decision-first
+delivery, and market-relative line boards.
 
 P4.0 owns independent game probabilities. P4.1 joins those probabilities to
 verified sportsbook prices. P4.2 serves an explicitly hydrated, durable weekly
 market snapshot without spending provider credits on ordinary product reads.
-Existing line-board routes remain market-relative.
+P4.3 only transforms that persisted board for user-facing decision surfaces;
+it never upgrades upstream actionability.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import odds_api
 import p40_game_intelligence
 import p41_game_market_pricing
 import p42_live_market_hydration
+import p43_game_decision_delivery
 import value_engine as ve
 
 games_bp = Blueprint("games", __name__)
@@ -180,6 +182,18 @@ def api_game_market_board_week():
             stype,
         )
     )
+
+
+@games_bp.route("/api/game-decision-board/week")
+def api_game_decision_board_week():
+    """P4.3 decision-first, cache-only user delivery from the persisted P4.2 board."""
+    cw = nfl_data.current_week()
+    season = int(request.args.get("season", cw["season"]))
+    week = int(request.args.get("week", cw["week"]))
+    stype = str(request.args.get("type", cw["season_type"] if season == cw["season"] else "REG")).upper()
+    if stype not in {"PRE", "REG", "POST"}:
+        return jsonify({"error": "invalid season type"}), 400
+    return jsonify(p43_game_decision_delivery.build_week_delivery(season, week, stype))
 
 
 @games_bp.route("/api/game-market-hydration/status")
