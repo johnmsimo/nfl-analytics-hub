@@ -51,6 +51,10 @@ def main() -> int:
         scheduler_row = db.session.scalar(
             db.select(ScheduledJob).where(ScheduledJob.key == "game-market-refresh")
         )
+        # Copy ORM state while the row is still attached to this SQLAlchemy session.
+        # rollback()/context teardown expires/detaches ORM instances, so the verifier
+        # must not dereference scheduler_row after leaving this block.
+        scheduler_job_registered = scheduler_row is not None and bool(scheduler_row.enabled)
         db.session.rollback()
 
     stale = p45.enrich_delivery(_synthetic_delivery("stale"))
@@ -67,8 +71,7 @@ def main() -> int:
         and slate.get("seasonType") == "REG"
         and slate.get("week") == 1,
         "status_check_is_zero_credit": status.get("providerSpend") is False,
-        "scheduler_job_registered": scheduler_row is not None
-        and bool(scheduler_row.enabled),
+        "scheduler_job_registered": scheduler_job_registered,
         "opportunity_contract_valid": audit.get("ok") is True,
         "opportunity_board_has_useful_model_pool": int(summary.get("visibleOpportunities") or 0) >= 4,
         "stale_positive_play_requires_refresh": stale_item.get("opportunityState") == "REFRESH"
