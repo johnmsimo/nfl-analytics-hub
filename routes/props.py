@@ -1,10 +1,10 @@
 """
-Props routes: per-game player intelligence and the weekly edge board.
+Props routes: per-game player intelligence and the weekly decision board.
 
-P3.3 keeps the transparent distribution projection as the statistical core,
-then adds evidence-aware probability calibration, uncertainty, matchup quality,
-and a model-first ranking score.  Sportsbook edge/EV/Kelly still flow through
-``value_engine`` when prices exist; model-only rows remain explicitly tagged.
+P3.4 keeps the P3.3 evidence-calibrated projection as the statistical core,
+then adds deterministic Monte Carlo distribution confirmation and one canonical
+decision contract. Sportsbook edge/EV/Kelly remain separate from model quality;
+unpriced model picks never masquerade as actionable priced bets.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import time
 
 from flask import Blueprint, jsonify, request
 
+import decision_intelligence as di
 import nfl_data
 import odds_api
 import player_intelligence as pi
@@ -58,7 +59,7 @@ def _best_price(rows: list[dict], side: str):
 
 
 def _build_game_rows(game: dict, season: int) -> list[dict]:
-    """All P3.3 prop rows for one game joined to available sportsbook prices."""
+    """All P3.4 player-market decisions for one game."""
     ss = pd.stats_season(season)
     logs = pd.player_game_logs(ss)
     idx = pd.player_index(season, ss)
@@ -88,9 +89,6 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
         opponent = away if team == home else home
         normalized_name = _norm_name(meta["name"])
         for market in markets:
-            # First pass establishes the projection mean used only when no real
-            # sportsbook line exists.  The second pass evaluates the actual
-            # line and applies evidence-aware probability calibration.
             preview = pi.analyze_projection(
                 history,
                 market,
@@ -140,7 +138,18 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
                 expected = ve.expected_value(p_side, best_side["price"])
                 ev_pct = round(expected, 4) if expected is not None else None
                 kelly = ve.kelly_stake(p_side, best_side["price"])["stake_pct"]
-            rank_score = pi.ranking_score(intelligence, edge=edge, ev=ev_pct)
+
+            p33_rank_score = pi.ranking_score(intelligence, edge=edge, ev=ev_pct)
+            decision = di.build_prop_decision(
+                intelligence,
+                side=side,
+                line=float(line),
+                price=best_side["price"] if best_side else None,
+                edge=edge,
+                ev=ev_pct,
+                simulations=1200,
+                seed=di.stable_seed(game["game_id"], player_id, market, line),
+            )
             confidence = intelligence["confidence"]
             matchup = intelligence["matchup"]
             rows.append(
@@ -176,7 +185,19 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
                     "projectionRange": intelligence["interval"],
                     "riskFlags": intelligence["riskFlags"],
                     "signalStrength": intelligence["signalStrength"],
-                    "rankScore": rank_score,
+                    "modelRankScore": p33_rank_score,
+                    "rankScore": decision["decisionScore"],
+                    "decisionGrade": decision["decisionGrade"],
+                    "decisionScore": decision["decisionScore"],
+                    "consensusProb": decision["consensusProbability"],
+                    "simulationProb": decision["simulationProbability"],
+                    "simulationAgreement": decision["simulationAgreement"],
+                    "simulation": decision["simulation"],
+                    "priceStatus": decision["priceStatus"],
+                    "actionable": decision["actionable"],
+                    "recommendedAction": decision["recommendedAction"],
+                    "decisionReasons": decision["decisionReasons"],
+                    "decisionRisks": decision["decisionRisks"],
                     "bestOver": best_over,
                     "bestUnder": best_under,
                     "fairProb": round(fair, 4) if fair is not None else None,
@@ -187,12 +208,19 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
                     "grade": ve.edge_grade(edge),
                     "bookCount": len({book["book"] for book in books}),
                     "noOdds": no_odds,
-                    "modelSource": intelligence["modelVersion"],
+                    "modelSource": decision["modelVersion"],
                     "evidenceSeason": ss,
                     "rosterVerified": bool(meta.get("rosterVerified")),
                 }
             )
-    rows.sort(key=lambda row: (-row["rankScore"], row["edge"] is None, -(row["edge"] or 0)))
+    rows.sort(
+        key=lambda row: (
+            -row["decisionScore"],
+            row["decisionGrade"] == "Pass",
+            row["edge"] is None,
+            -(row["edge"] or 0),
+        )
+    )
     return rows
 
 
@@ -200,7 +228,7 @@ def _build_game_rows(game: dict, season: int) -> list[dict]:
 def api_props_game(game_id):
     cw = nfl_data.current_week()
     season = int(request.args.get("season", cw["season"]))
-    key = ("game", game_id, season, "p3.3")
+    key = ("game", game_id, season, "p3.4")
     hit = _cache_get(key)
     if hit and request.args.get("refresh") != "1":
         return jsonify(hit)
@@ -214,7 +242,7 @@ def api_props_game(game_id):
     out = {
         "game": game,
         "stats_season": pd.stats_season(season),
-        "model_version": "p3.3-evidence-calibrated",
+        "model_version": "p3.4-simulation-decision",
         "rows": rows,
     }
     _cache_set(key, out)
@@ -229,7 +257,7 @@ def api_props_board():
     season_type = request.args.get(
         "type", cw["season_type"] if season == cw["season"] else "REG"
     )
-    key = ("board", season, week, season_type, "p3.3")
+    key = ("board", season, week, season_type, "p3.4")
     hit = _cache_get(key)
     if hit and request.args.get("refresh") != "1":
         return jsonify(hit)
@@ -237,25 +265,43 @@ def api_props_board():
     rows: list[dict] = []
     for game in games:
         rows.extend(_build_game_rows(game, season))
-    rows.sort(key=lambda row: (-row["rankScore"], row["edge"] is None, -(row["edge"] or 0)))
+    rows.sort(
+        key=lambda row: (
+            -row["decisionScore"],
+            row["decisionGrade"] == "Pass",
+            row["edge"] is None,
+            -(row["edge"] or 0),
+        )
+    )
     out = {
         "season": season,
         "week": week,
         "season_type": season_type,
         "games": len(games),
         "rows": rows,
+        "decision_summary": di.summarize_decisions(rows),
         "stats_season": pd.stats_season(season),
         "odds_configured": odds_api.is_configured(),
-        "model_version": "p3.3-evidence-calibrated",
-        "ranking": "model confidence + calibrated signal + available price value",
+        "model_version": "p3.4-simulation-decision",
+        "ranking": "simulation-confirmed model decision quality, then available price value",
     }
     _cache_set(key, out)
     return jsonify(out)
 
 
+@props_bp.route("/api/decisions/week")
+def api_decisions_week():
+    """Canonical pick feed: model Lean-or-better rows, priced or explicitly unpriced."""
+    response = api_props_board()
+    data = response.get_json()
+    grades = {"Strong Play", "Play", "Lean"}
+    rows = [row for row in data["rows"] if row.get("decisionGrade") in grades]
+    return jsonify({**data, "rows": rows, "decision_filter": "Lean or better"})
+
+
 @props_bp.route("/api/edges/week")
 def api_edges_week():
-    """Quant feed: the P3.3 board filtered to positive-EV priced rows."""
+    """Quant feed: positive-EV priced rows with P3.4 decision metadata."""
     min_ev = float(request.args.get("minEv", "0.03"))
     response = api_props_board()
     data = response.get_json()

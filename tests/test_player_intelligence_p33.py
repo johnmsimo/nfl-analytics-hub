@@ -108,16 +108,18 @@ def test_leave_forward_backtest_is_bounded_and_has_samples():
     assert result["reliability"]
 
 
-def test_props_and_analytics_use_p33_intelligence_layer():
+def test_props_and_analytics_preserve_p33_intelligence_under_p34_decisions():
     props = (ROOT / "routes" / "props.py").read_text(encoding="utf-8")
     analytics = (ROOT / "routes" / "intelligence.py").read_text(encoding="utf-8")
     board = (ROOT / "props.html").read_text(encoding="utf-8")
     for source in (props, analytics):
         assert "import player_intelligence as pi" in source
         assert "pi.analyze_projection(" in source
-    assert 'sortKey = \'rankScore\'' in board
+        assert "modelRankScore" in source
     assert "confidenceScore" in board
     assert "matchupGrade" in board
+    assert "decisionScore" in board
+    assert "simulationAgreement" in board
 
 
 def test_p33_workflow_is_read_only_and_avoids_paid_provider_calls():
