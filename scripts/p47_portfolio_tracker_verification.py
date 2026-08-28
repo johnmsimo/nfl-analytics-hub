@@ -39,10 +39,13 @@ def _synthetic_report() -> dict:
         "pairedFairBookCount": 3,
         "bestBook": "SyntheticBook",
         "bestPrice": -105,
+        "quoteAt": "2026-09-13T16:58:00+00:00",
         "quoteAgeSeconds": 10,
         "actionable": True,
         "opportunityState": "ACTIONABLE",
         "portfolioEligible": True,
+        "requestedStakePct": 0.025,
+        "requestedStakeDollars": 25.0,
         "recommendedStakePct": 0.025,
         "recommendedStakeDollars": 25.0,
         "recommendedStakeUnits": 2.5,
@@ -92,6 +95,7 @@ def main() -> int:
 
     synthetic = _synthetic_report()
     row = synthetic["portfolio"][0]
+    displayed_key = p47.tracking_key(row)
     payload = p47.to_tracker_payload(row, synthetic)
     blocked = p47.confirm_portfolio_from_report(
         synthetic,
@@ -101,7 +105,21 @@ def main() -> int:
     dry_run = p47.confirm_portfolio_from_report(
         synthetic,
         confirmed=True,
-        selection_keys=[p47.tracking_key(row)],
+        selection_keys=[displayed_key],
+        persist=False,
+    )
+    empty = p47.confirm_portfolio_from_report(
+        synthetic,
+        confirmed=True,
+        selection_keys=[],
+        persist=False,
+    )
+    changed = _synthetic_report()
+    changed["portfolio"][0]["bestPrice"] = -110
+    stale = p47.confirm_portfolio_from_report(
+        changed,
+        confirmed=True,
+        selection_keys=[displayed_key],
         persist=False,
     )
     unknown = p47.confirm_portfolio_from_report(
@@ -132,6 +150,7 @@ def main() -> int:
         "production_tracking_is_read_only": (tracking.get("safety") or {}).get("trackerWrite") is False,
         "production_tracking_is_zero_credit": (tracking.get("safety") or {}).get("providerIo") is False,
         "production_never_places_bets": (tracking.get("safety") or {}).get("automaticBetPlacement") is False,
+        "confirmation_binds_exact_allocation": (tracking.get("safety") or {}).get("confirmationBindsExactAllocation") is True,
         "explicit_confirmation_is_required": blocked.get("ok") is False
         and blocked.get("error") == "explicit_confirmation_required"
         and blocked.get("saved") == 0,
@@ -140,6 +159,11 @@ def main() -> int:
         and dry_run.get("planned") == 1
         and dry_run.get("saved") == 0
         and (dry_run.get("safety") or {}).get("trackerWrite") is False,
+        "empty_selection_stays_empty": empty.get("ok") is True
+        and empty.get("planned") == 0
+        and empty.get("saved") == 0,
+        "changed_allocation_rejects_stale_confirmation": stale.get("ok") is False
+        and stale.get("error") == "unknown_portfolio_selection",
         "unknown_selection_fails_closed": unknown.get("ok") is False
         and unknown.get("error") == "unknown_portfolio_selection",
         "moneyline_maps_to_tracker_h2h": payload.get("marketKey") == "h2h",
