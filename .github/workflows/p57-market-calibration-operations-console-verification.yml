@@ -1,0 +1,96 @@
+name: P5.7 Market Calibration Operations Console Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Confirm zero-credit, zero-write P5.7 market console verification
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_MARKET_CALIBRATION_OPERATIONS_CONSOLE_VERIFY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p57-market-calibration-operations-console-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: inputs.confirmation == 'RUN_MARKET_CALIBRATION_OPERATIONS_CONSOLE_VERIFY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate P5.7 market console safety controls
+        shell: bash
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirmation }}" = "RUN_MARKET_CALIBRATION_OPERATIONS_CONSOLE_VERIFY"
+          grep -q 'P5.7 · Spread &amp; Total Calibration Operations Console' model_operations.html
+          grep -q '/api/game-market-calibration/control-plane' model_operations.html
+          grep -q "role==='owner'" model_operations.html
+          grep -q 'c.promoteReady===true' model_operations.html
+          grep -q 'c.rollbackReady===true' model_operations.html
+          grep -q 'PROMOTE_GAME_MARKET_CALIBRATION' model_operations.html
+          grep -q 'ROLLBACK_GAME_MARKET_CALIBRATION' model_operations.html
+          grep -q 'Market-isolated governance' model_operations.html
+          grep -q 'No market mutation runs on page load or refresh' model_operations.html
+          ! grep -q '/api/game-market-calibration/promote' model_operations.html
+          ! grep -q '/api/game-market-calibration/rollback' model_operations.html
+
+      - name: Verify production readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(mktemp)"
+          trap 'rm -f "$BODY"' EXIT
+          set +e
+          HTTP_CODE=$(curl --silent --show-error --fail-with-body \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            --output "$BODY" --write-out "%{http_code}" \
+            https://nfl-analytics-hub.fly.dev/ready)
+          CURL_RC=$?
+          set -e
+          echo "Public /ready HTTP status: ${HTTP_CODE:-unknown}"
+          if [ -s "$BODY" ]; then
+            cat "$BODY"
+            echo
+          fi
+          if [ "$CURL_RC" -ne 0 ] || [ "${HTTP_CODE:-000}" != "200" ]; then
+            exit 1
+          fi
+          python - "$BODY" <<'PY'
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload.get("ok"), payload
+          assert payload.get("database") == "ready", payload
+          assert payload.get("schedule", {}).get("ready"), payload
+          PY
+
+      - name: Run sanitized P5.7 market calibration console verification
+        shell: bash
+        run: |
+          # Reads deployed console HTML, P5.6 governance, immutable P4.4 receipts,
+          # and append-only P5.4 promotion history. It performs no promotion,
+          # rollback, provider refresh, ledger write, Tracker write, or wager execution.
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p57_market_calibration_operations_console_verification.py"
+
+      - name: Re-run sanitized P2/P3 safety verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"

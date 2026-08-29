@@ -32,7 +32,10 @@ def test_p53_requires_exact_confirmation_and_second_human_confirmation(client):
 
 def test_p53_console_does_not_auto_mutate_on_load(client):
     html = client.get("/model-operations").get_data(as_text=True)
-    assert "await Promise.all([refreshStatus(),loadCalibration()]);activate(active);" in html
+    # Additional read-only governance loaders may be added by later phases.
+    # The P5.3 invariant is that its loader remains part of page initialization
+    # while promotion/rollback stay bound exclusively to explicit click handlers.
+    assert "await Promise.all([refreshStatus(),loadCalibration()" in html
     assert "$('#promote-btn').onclick=()=>runCalibrationMutation('promotion');" in html
     assert "$('#rollback-btn').onclick=()=>runCalibrationMutation('rollback');" in html
     assert "No mutation runs on page load or refresh." in html
