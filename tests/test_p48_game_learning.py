@@ -97,6 +97,28 @@ def test_overconfidence_and_negative_market_skill_are_review_only():
     assert report["promotionGate"]["automaticApply"] is False
 
 
+def test_market_skill_signal_includes_exact_alert_boundary():
+    receipts = [
+        _receipt(0.70, "win" if idx < 6 else "loss", market_probability=0.60)
+        for idx in range(10)
+    ]
+    report = p48.build_report_from_receipts(
+        receipts,
+        min_samples=10,
+        min_segment_samples=10,
+        calibration_alert=0.25,
+        max_ece=0.30,
+        market_skill_alert=0.01,
+    )
+    assert report["overall"]["brierSkillVsMarket"] == -0.01
+    assert any(
+        signal["type"] == "negative_market_skill"
+        and signal["brierSkillVsMarket"] == -0.01
+        for signal in report["signals"]
+    )
+    assert report["state"] == "review"
+
+
 def test_stable_game_calibration_holds_model_without_auto_apply():
     receipts = [
         _receipt(
