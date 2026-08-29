@@ -44,17 +44,12 @@ def _iso(value) -> str | None:
     return value.isoformat() if value else None
 
 
-def _latest_cache_sync() -> dict[str, Any] | None:
-    run = db.session.scalar(
-        select(DataSyncRun)
-        .where(DataSyncRun.source == "local-cache")
-        .order_by(DataSyncRun.id.desc())
-        .limit(1)
-    )
+def _sync_payload(run: DataSyncRun | None) -> dict[str, Any] | None:
     if not run:
         return None
     error = str(run.error or "")
     return {
+        "id": run.id,
         "status": run.status,
         "started_at": _iso(run.started_at),
         "finished_at": _iso(run.finished_at),
@@ -63,6 +58,29 @@ def _latest_cache_sync() -> dict[str, Any] | None:
         "error_category": _error_category(error),
         "error_fingerprint": (hashlib.sha256(error.encode("utf-8")).hexdigest()[:12] if error else None),
     }
+
+
+def _latest_cache_sync() -> dict[str, Any] | None:
+    run = db.session.scalar(
+        select(DataSyncRun)
+        .where(DataSyncRun.source == "local-cache")
+        .order_by(DataSyncRun.id.desc())
+        .limit(1)
+    )
+    return _sync_payload(run)
+
+
+def _last_completed_cache_sync() -> dict[str, Any] | None:
+    run = db.session.scalar(
+        select(DataSyncRun)
+        .where(
+            DataSyncRun.source == "local-cache",
+            DataSyncRun.status == "completed",
+        )
+        .order_by(DataSyncRun.id.desc())
+        .limit(1)
+    )
+    return _sync_payload(run)
 
 
 def _warehouse_counts() -> dict[str, int]:
@@ -106,6 +124,7 @@ def build_preview() -> dict[str, Any]:
             "last_status": retention_job.last_status if retention_job else None,
         },
         "latest_cached_data_sync": _latest_cache_sync(),
+        "last_completed_cached_data_sync": _last_completed_cache_sync(),
     }
 
 
