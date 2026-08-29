@@ -1,6 +1,6 @@
 """
 Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
-outcome-learning diagnostics, calibration challenger/promotion governance,
+outcome-learning diagnostics, calibration challenger/promotion/guard governance,
 automatic grading, closing capture, and bankroll settings.
 """
 from __future__ import annotations
@@ -14,6 +14,7 @@ import p44_game_decision_ledger
 import p48_game_learning
 import p49_game_calibration
 import p50_game_calibration_promotion
+import p51_game_calibration_guard
 import tracker
 from security import bounded_number, json_body, limiter, require_roles
 
@@ -164,6 +165,13 @@ def api_game_calibration_challenger():
 def api_game_calibration_champion():
     """P5.0 read-only champion, promotion-readiness, and immutable event status."""
     return jsonify(p50_game_calibration_promotion.build_status())
+
+
+@tracker_bp.route("/api/game-calibration/guard")
+@tracker_bp.route("/api/tracker/game-calibration-guard")
+def api_game_calibration_guard():
+    """P5.1 read-only post-promotion champion safety monitor."""
+    return jsonify(p51_game_calibration_guard.build_production_report())
 
 
 @tracker_bp.route("/api/game-calibration/promote", methods=["POST"])
