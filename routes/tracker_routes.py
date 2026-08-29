@@ -1,11 +1,11 @@
 """
 Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
-outcome-learning diagnostics, calibration challenger governance, automatic
-grading, closing capture, and bankroll settings.
+outcome-learning diagnostics, calibration challenger/promotion governance,
+automatic grading, closing capture, and bankroll settings.
 """
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 import decision_ledger
 import p38_learning
@@ -13,8 +13,9 @@ import p39_calibration
 import p44_game_decision_ledger
 import p48_game_learning
 import p49_game_calibration
+import p50_game_calibration_promotion
 import tracker
-from security import bounded_number, json_body, limiter
+from security import bounded_number, json_body, limiter, require_roles
 
 tracker_bp = Blueprint("tracker", __name__)
 
@@ -156,6 +157,48 @@ def api_game_learning():
 def api_game_calibration_challenger():
     """P4.9 read-only forward-holdout game calibration challenger report."""
     return jsonify(p49_game_calibration.build_production_report())
+
+
+@tracker_bp.route("/api/game-calibration/champion")
+@tracker_bp.route("/api/tracker/game-calibration-champion")
+def api_game_calibration_champion():
+    """P5.0 read-only champion, promotion-readiness, and immutable event status."""
+    return jsonify(p50_game_calibration_promotion.build_status())
+
+
+@tracker_bp.route("/api/game-calibration/promote", methods=["POST"])
+@tracker_bp.route("/api/tracker/game-calibration-promote", methods=["POST"])
+@limiter.limit(5, 60, key="user")
+@require_roles("owner")
+def api_game_calibration_promote():
+    payload = json_body(
+        allowed={"candidateId", "confirmation"},
+        required={"candidateId", "confirmation"},
+    )
+    actor = str((session.get("user") or {}).get("username") or "owner")
+    result = p50_game_calibration_promotion.promote_candidate(
+        str(payload["candidateId"]),
+        confirmation=str(payload["confirmation"]),
+        actor=actor,
+    )
+    if result.get("ok"):
+        return jsonify(result)
+    code = result.get("code")
+    return jsonify(result), 409 if code == "PROMOTION_GATE_FAILED" else 400
+
+
+@tracker_bp.route("/api/game-calibration/rollback", methods=["POST"])
+@tracker_bp.route("/api/tracker/game-calibration-rollback", methods=["POST"])
+@limiter.limit(5, 60, key="user")
+@require_roles("owner")
+def api_game_calibration_rollback():
+    payload = json_body(allowed={"confirmation"}, required={"confirmation"})
+    actor = str((session.get("user") or {}).get("username") or "owner")
+    result = p50_game_calibration_promotion.rollback_to_baseline(
+        confirmation=str(payload["confirmation"]),
+        actor=actor,
+    )
+    return (jsonify(result), 200) if result.get("ok") else (jsonify(result), 400)
 
 
 @tracker_bp.route("/api/tracker/learning")

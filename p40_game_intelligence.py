@@ -6,7 +6,9 @@ a deterministic, warehouse-backed moneyline model.
 
 This phase is model-only. It does not call an odds provider and it never marks a
 selection actionable. Sportsbook price/EV actionability remains a separate
-market layer.
+market layer. P5.0 may apply an explicitly owner-promoted calibration champion
+to the selected-side moneyline probability without changing the underlying
+team-strength model or any market/actionability threshold.
 """
 from __future__ import annotations
 
@@ -189,6 +191,23 @@ def _decision_grade(probability: float, confidence: float) -> str:
     return "Pass"
 
 
+def _promotion_calibration(selected_probability: float) -> dict[str, Any]:
+    """Lazy-load P5.0 so the P4.9 -> P4.4 -> P4.1 -> P4.0 import chain stays acyclic."""
+    try:
+        from p50_game_calibration_promotion import apply_to_selected_probability
+
+        return apply_to_selected_probability(selected_probability)
+    except Exception:  # noqa: BLE001 - prediction must fail safely to baseline
+        return {
+            "probability": float(selected_probability),
+            "rawProbability": float(selected_probability),
+            "applied": False,
+            "candidateId": None,
+            "modelVersion": "p50-promotion-v1",
+            "championState": "unavailable",
+        }
+
+
 def predict_game(
     game: dict[str, Any],
     home_profile: dict[str, Any],
@@ -213,17 +232,27 @@ def predict_game(
     shrink = 0.50 + 0.50 * _clamp(evidence_quality, 0.0, 1.0)
     calibrated_home = 0.5 + (raw_home - 0.5) * shrink
     simulation_home = _normal_margin_probability(model_margin, float(active["simulationMarginSd"]))
-    consensus_home = _clamp(calibrated_home * 0.75 + simulation_home * 0.25, 0.08, 0.92)
+    pre_promotion_home = _clamp(calibrated_home * 0.75 + simulation_home * 0.25, 0.08, 0.92)
     agreement = 1.0 - abs(calibrated_home - simulation_home)
+
+    selected_side = "home" if pre_promotion_home >= 0.5 else "away"
+    pre_promotion_selected = (
+        pre_promotion_home if selected_side == "home" else 1.0 - pre_promotion_home
+    )
+    calibration = _promotion_calibration(pre_promotion_selected)
+    selected_probability = _clamp(
+        _number(calibration.get("probability"), pre_promotion_selected), 0.5, 0.999
+    )
+    consensus_home = (
+        selected_probability if selected_side == "home" else 1.0 - selected_probability
+    )
+
     confidence = _clamp(
         evidence_quality * 72.0 + abs(consensus_home - 0.5) * 55.0 + agreement * 8.0,
         35.0,
         99.0,
     )
-
-    selected_side = "home" if consensus_home >= 0.5 else "away"
     selected_team = game.get("home_team") if selected_side == "home" else game.get("away_team")
-    selected_probability = consensus_home if selected_side == "home" else 1.0 - consensus_home
     grade = _decision_grade(consensus_home, confidence)
     reasons = [
         {
@@ -239,6 +268,16 @@ def predict_game(
             "quality": round(evidence_quality, 4),
         },
     ]
+    if calibration.get("applied"):
+        reasons.insert(
+            0,
+            {
+                "factor": "promoted calibration champion",
+                "candidateId": calibration.get("candidateId"),
+                "prePromotionProbability": round(pre_promotion_selected, 6),
+                "postPromotionProbability": round(selected_probability, 6),
+            },
+        )
     risks: list[str] = []
     if home_profile.get("evidenceMode") != "current-season" or away_profile.get("evidenceMode") != "current-season":
         risks.append("Early-season estimate uses prior-season or thin current-season evidence.")
@@ -249,6 +288,10 @@ def predict_game(
     if not risks:
         risks.append("Normal game-to-game variance can overwhelm a modest model edge.")
 
+    effective_version = MODEL_VERSION
+    if calibration.get("applied") and calibration.get("candidateId"):
+        effective_version = f"{MODEL_VERSION}+{calibration['candidateId']}"
+
     return {
         "gameId": str(game.get("game_id") or ""),
         "season": game.get("season"),
@@ -258,10 +301,12 @@ def predict_game(
         "homeTeam": game.get("home_team"),
         "awayTeam": game.get("away_team"),
         "model": MODEL_NAME,
-        "modelVersion": MODEL_VERSION,
+        "modelVersion": effective_version,
+        "baseModelVersion": MODEL_VERSION,
         "market": "moneyline",
         "modelHomeMargin": round(model_margin, 3),
         "rawHomeWinProbability": round(raw_home, 6),
+        "prePromotionHomeWinProbability": round(pre_promotion_home, 6),
         "homeWinProbability": round(consensus_home, 6),
         "awayWinProbability": round(1.0 - consensus_home, 6),
         "simulationHomeWinProbability": round(simulation_home, 6),
@@ -272,7 +317,9 @@ def predict_game(
         "decisionGrade": grade,
         "selectedSide": selected_side,
         "selectedTeam": selected_team,
+        "prePromotionSelectedProbability": round(pre_promotion_selected, 6),
         "selectedProbability": round(selected_probability, 6),
+        "calibration": calibration,
         "recommendedAction": "MODEL PICK" if grade in {"Strong Play", "Play", "Lean"} else "PASS",
         "actionable": False,
         "priceStatus": "model-only",
