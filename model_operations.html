@@ -21,8 +21,12 @@
     .ops-output pre{white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#bdd0ef}
     .ops-note{padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.04);color:var(--mu);font-size:12px}
     .ops-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:rgba(139,92,246,.16);color:#c3b3ff;font-size:11px;font-weight:900}
-    @media(max-width:980px){.ops-grid{grid-template-columns:repeat(2,1fr)}.ops-layout{grid-template-columns:1fr}.ops-form textarea{min-height:220px}}
-    @media(max-width:430px){.ops-grid{grid-template-columns:1fr}.ops-tabs button{min-width:max-content}.ops-output{min-height:300px}}
+    .cal-wrap{margin-bottom:18px;padding:15px}.cal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.cal-head h2{margin:0;font-size:17px}.cal-head p{margin:5px 0 0;color:var(--mu);font-size:11px;max-width:760px}.cal-state{display:inline-flex;align-items:center;border:1px solid var(--b);border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase;color:var(--cyan)}.cal-state.review,.cal-state.rollback-review{color:var(--warn)}.cal-state.champion-healthy{color:var(--g)}
+    .cal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.cal-metric{padding:10px;border:1px solid var(--b);border-radius:10px;background:var(--card3)}.cal-metric span{display:block;color:var(--mu);font-size:9px;text-transform:uppercase;letter-spacing:.05em}.cal-metric b{display:block;margin-top:4px;font-size:13px;word-break:break-word}.cal-decision{margin-top:10px;padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.035)}.cal-decision strong{display:block;font-size:12px}.cal-decision p{margin:5px 0 0;color:var(--mu);font-size:10px;line-height:1.5}.cal-blockers{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.cal-chip{border:1px solid var(--b);border-radius:999px;padding:3px 7px;color:var(--mu);font-size:9px}.cal-safety{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.cal-safety .cal-chip{color:var(--g);border-color:rgba(34,197,94,.28)}
+    .cal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.cal-action{padding:12px;border:1px solid var(--b);border-radius:10px;background:var(--card3)}.cal-action h3{margin:0;font-size:12px}.cal-action p{margin:5px 0 9px;color:var(--mu);font-size:10px;line-height:1.45}.cal-action code{font-size:9px;color:var(--cyan);word-break:break-all}.cal-action input{width:100%;margin:8px 0;border:1px solid var(--b);background:var(--bg);color:var(--t);border-radius:8px;padding:9px;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}.cal-action .btn{width:100%}.cal-owner{margin-top:8px;color:var(--mu);font-size:9px}.cal-owner.owner{color:var(--g)}.cal-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.cal-toolbar .btn{padding:7px 10px;font-size:10px}
+    @media(max-width:980px){.ops-grid,.cal-grid{grid-template-columns:repeat(2,1fr)}.ops-layout{grid-template-columns:1fr}.ops-form textarea{min-height:220px}}
+    @media(max-width:620px){.cal-actions{grid-template-columns:1fr}.cal-head{flex-direction:column}.cal-toolbar{width:100%}.cal-toolbar .btn{flex:1}}
+    @media(max-width:430px){.ops-grid,.cal-grid{grid-template-columns:1fr}.ops-tabs button{min-width:max-content}.ops-output{min-height:300px}}
   </style>
 </head>
 <body>
@@ -31,10 +35,60 @@
     <header class="ai-pagehead">
       <div>
         <h1>Model Operations</h1>
-        <p>Persistent registry, evidence-bound approvals, lifecycle health, alerts, and audit history.</p>
+        <p>Persistent registry, evidence-bound approvals, lifecycle health, calibration governance, alerts, and audit history.</p>
       </div>
-      <span class="ops-badge">v4.3.3</span>
+      <span class="ops-badge">P5.3 · v4.3.3</span>
     </header>
+
+    <section class="ai-card cal-wrap" id="calibration-console" aria-label="Game calibration governance">
+      <div class="cal-head">
+        <div>
+          <h2>P5.3 · Game Calibration Operations Console</h2>
+          <p>One human-review surface for the P4.9 challenger, P5.0 champion controls, P5.1 post-promotion guard, and P5.2 canonical operating decision. No mutation runs on page load or refresh.</p>
+        </div>
+        <div class="cal-toolbar">
+          <span class="cal-state" id="cal-state">Loading…</span>
+          <button class="btn" type="button" id="cal-refresh">Refresh governance</button>
+        </div>
+      </div>
+      <div class="cal-grid">
+        <div class="cal-metric"><span>Recommended action</span><b id="cal-recommendation">—</b></div>
+        <div class="cal-metric"><span>Champion</span><b id="cal-champion">—</b></div>
+        <div class="cal-metric"><span>Challenger graded</span><b id="cal-challenger-samples">—</b></div>
+        <div class="cal-metric"><span>Guard graded</span><b id="cal-guard-samples">—</b></div>
+      </div>
+      <div class="cal-decision">
+        <strong id="cal-message">Loading canonical P5.2 control-plane decision…</strong>
+        <p id="cal-evidence">P4.9, P5.0, and P5.1 evidence will appear here.</p>
+        <div class="cal-blockers" id="cal-blockers"></div>
+      </div>
+      <div class="cal-safety">
+        <span class="cal-chip">Zero provider calls</span>
+        <span class="cal-chip">No automatic promotion</span>
+        <span class="cal-chip">No automatic rollback</span>
+        <span class="cal-chip">Owner confirmation required</span>
+        <span class="cal-chip">No wager execution</span>
+      </div>
+      <div class="cal-actions">
+        <section class="cal-action">
+          <h3>Promote eligible challenger</h3>
+          <p>The console enables this only when P5.2 says <b>promoteReady</b> and the signed-in role is <b>owner</b>. Type the exact confirmation token shown below.</p>
+          <code id="promote-token">PROMOTE_GAME_CALIBRATION</code>
+          <input id="promote-confirm" autocomplete="off" placeholder="Type exact promotion confirmation" aria-label="Promotion confirmation">
+          <button class="btn primary" id="promote-btn" type="button" disabled>Promote challenger</button>
+          <div class="cal-owner" id="promote-help">Checking owner role and promotion readiness…</div>
+        </section>
+        <section class="cal-action">
+          <h3>Rollback promoted champion</h3>
+          <p>The console activates rollback only when P5.1 recommends rollback review. The P5.0 endpoint remains owner-only and requires exact confirmation.</p>
+          <code id="rollback-token">ROLLBACK_GAME_CALIBRATION</code>
+          <input id="rollback-confirm" autocomplete="off" placeholder="Type exact rollback confirmation" aria-label="Rollback confirmation">
+          <button class="btn" id="rollback-btn" type="button" disabled>Rollback to baseline</button>
+          <div class="cal-owner" id="rollback-help">Checking owner role and rollback recommendation…</div>
+        </section>
+      </div>
+    </section>
+
     <section class="ops-grid" aria-label="Lifecycle status">
       <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Registry</span><b id="kpi-models">—</b></article>
       <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Pending approvals</span><b id="kpi-approvals">—</b></article>
@@ -78,12 +132,17 @@ document.addEventListener('DOMContentLoaded',async()=>{
    'Recent events':{method:'GET',endpoint:'/api/v4.3/operations/audit?limit=100',payload:null}
   },note:'Audit history is append-only and payload-bounded. It records mutations, actors, evidence references, and sequence.'}
  };
- let active='registry';
+ let active='registry',calibration=null,sessionInfo=null;
  $('#ops-tabs').innerHTML=panels.map(id=>`<button type="button" data-id="${id}">${id[0].toUpperCase()+id.slice(1)}</button>`).join('');
  $('#ops-tabs').onclick=e=>{const b=e.target.closest('[data-id]');if(b)activate(b.dataset.id)};
  $('#action').onchange=fillAction;
  $('#ops-form').onsubmit=run;
- await refreshStatus();activate(active);
+ $('#cal-refresh').onclick=loadCalibration;
+ $('#promote-confirm').oninput=syncCalibrationButtons;
+ $('#rollback-confirm').oninput=syncCalibrationButtons;
+ $('#promote-btn').onclick=()=>runCalibrationMutation('promotion');
+ $('#rollback-btn').onclick=()=>runCalibrationMutation('rollback');
+ await Promise.all([refreshStatus(),loadCalibration()]);activate(active);
  function activate(id){
   active=id;document.querySelectorAll('#ops-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.id===id));
   $('#action').innerHTML=Object.keys(examples[id].actions).map(x=>`<option>${esc(x)}</option>`).join('');
@@ -113,6 +172,59 @@ document.addEventListener('DOMContentLoaded',async()=>{
    $('#kpi-models').textContent=s.registry.total;$('#kpi-approvals').textContent=s.approvals.pending;
    $('#kpi-unhealthy').textContent=s.health.unhealthy_models;$('#kpi-audit').textContent=s.audit_events;
   }catch(err){['#kpi-models','#kpi-approvals','#kpi-unhealthy','#kpi-audit'].forEach(id=>$(id).textContent='!')}
+ }
+ async function loadCalibration(){
+  $('#cal-refresh').disabled=true;$('#cal-state').textContent='Loading…';
+  try{
+   const [control,auth]=await Promise.all([fetchJSON('/api/game-calibration/control-plane'),fetchJSON('/api/auth/session')]);
+   calibration=control;sessionInfo=auth;renderCalibration();
+  }catch(err){
+   calibration=null;$('#cal-state').textContent='Unavailable';$('#cal-message').textContent=`Calibration control plane unavailable: ${err.message}`;
+   $('#cal-evidence').textContent='No promotion or rollback action is available while governance state cannot be loaded.';syncCalibrationButtons();
+  }finally{$('#cal-refresh').disabled=false}
+ }
+ function renderCalibration(){
+  const c=calibration||{},ev=c.evidence||{},role=String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase();
+  const state=String(c.state||'unavailable');$('#cal-state').textContent=state.replaceAll('-',' ');$('#cal-state').className=`cal-state ${state}`;
+  $('#cal-recommendation').textContent=String(c.recommendedAction||'—').replaceAll('_',' ');
+  $('#cal-champion').textContent=c.championApplied?(c.championCandidateId||'promoted'):'Baseline';
+  $('#cal-challenger-samples').textContent=ev.challengerGradedSamples??0;$('#cal-guard-samples').textContent=ev.guardGradedSamples??0;
+  $('#cal-message').textContent=c.message||'No canonical calibration decision is available.';
+  $('#cal-evidence').textContent=`P4.9 ${ev.challengerState||'—'} · P4.9 eligible ${ev.p49Eligible===true?'yes':'no'} · P5.0 eligible ${ev.p50Eligible===true?'yes':'no'} · P5.1 ${ev.guardState||'—'} · rollback recommended ${ev.rollbackRecommended===true?'yes':'no'}.`;
+  const blockers=c.blockers||[];$('#cal-blockers').innerHTML=blockers.length?blockers.map(x=>`<span class="cal-chip">${esc(String(x).replaceAll('_',' '))}</span>`).join(''):'<span class="cal-chip">No active blockers for the current canonical state</span>';
+  $('#promote-token').textContent=c.commands?.promotion?.confirmation||'PROMOTE_GAME_CALIBRATION';
+  $('#rollback-token').textContent=c.commands?.rollback?.confirmation||'ROLLBACK_GAME_CALIBRATION';
+  $('#promote-help').textContent=role==='owner'?(c.promoteReady?`Owner verified · candidate ${c.candidateId}`:'Owner verified · promotion is not currently eligible'):`Role ${role||'unknown'} · owner required`;
+  $('#rollback-help').textContent=role==='owner'?(c.rollbackReady?'Owner verified · P5.1 recommends rollback review':'Owner verified · rollback is not currently recommended'):`Role ${role||'unknown'} · owner required`;
+  $('#promote-help').classList.toggle('owner',role==='owner');$('#rollback-help').classList.toggle('owner',role==='owner');
+  syncCalibrationButtons();
+ }
+ function syncCalibrationButtons(){
+  const role=String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase(),owner=role==='owner',c=calibration||{};
+  const promoteToken=c.commands?.promotion?.confirmation||'PROMOTE_GAME_CALIBRATION';
+  const rollbackToken=c.commands?.rollback?.confirmation||'ROLLBACK_GAME_CALIBRATION';
+  $('#promote-btn').disabled=!(owner&&c.promoteReady===true&&$('#promote-confirm').value===promoteToken);
+  $('#rollback-btn').disabled=!(owner&&c.rollbackReady===true&&$('#rollback-confirm').value===rollbackToken);
+ }
+ async function runCalibrationMutation(kind){
+  const c=calibration||{},command=c.commands?.[kind]||{},role=String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase();
+  if(role!=='owner'){toast('Owner role required');return}
+  if(kind==='promotion'&&c.promoteReady!==true){toast('Promotion is not eligible');return}
+  if(kind==='rollback'&&c.rollbackReady!==true){toast('Rollback is not recommended by P5.1');return}
+  const input=kind==='promotion'?$('#promote-confirm'):$('#rollback-confirm');
+  if(input.value!==command.confirmation){toast('Exact confirmation token required');return}
+  const candidate=kind==='promotion'?c.candidateId:null;
+  const text=kind==='promotion'?`Promote calibration candidate ${candidate}? This changes production moneyline probabilities.`:'Rollback the promoted calibration champion to the P4.0 baseline?';
+  if(!confirm(text))return;
+  const button=kind==='promotion'?$('#promote-btn'):$('#rollback-btn');button.disabled=true;button.textContent=kind==='promotion'?'Promoting…':'Rolling back…';
+  try{
+   const body=kind==='promotion'?{candidateId:candidate,confirmation:command.confirmation}:{confirmation:command.confirmation};
+   const result=await fetchJSON(command.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+   toast(kind==='promotion'?'Calibration champion promoted':'Calibration champion rolled back');input.value='';
+   $('#ops-output-title').textContent='Calibration governance mutation';$('#ops-output').innerHTML=`<pre>${esc(JSON.stringify(result,null,2))}</pre>`;
+   await loadCalibration();
+  }catch(err){toast(err.message);await loadCalibration()}
+  finally{button.textContent=kind==='promotion'?'Promote challenger':'Rollback to baseline';syncCalibrationButtons()}
  }
 });
 </script>
