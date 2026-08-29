@@ -1,7 +1,8 @@
 """
 Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
 outcome-learning diagnostics, calibration challenger/promotion/guard/control-plane
-governance, automatic grading, closing capture, and bankroll settings.
+and market-calibration governance, automatic grading, closing capture, and
+bankroll settings.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import p49_game_calibration
 import p50_game_calibration_promotion
 import p51_game_calibration_guard
 import p52_game_calibration_control_plane
+import p54_game_market_calibration
 import tracker
 from security import bounded_number, json_body, limiter, require_roles
 
@@ -182,6 +184,13 @@ def api_game_calibration_control_plane():
     return jsonify(p52_game_calibration_control_plane.build_production_control_plane())
 
 
+@tracker_bp.route("/api/game-market-calibration/status")
+@tracker_bp.route("/api/tracker/game-market-calibration")
+def api_game_market_calibration_status():
+    """P5.4 market-isolated spread/total calibration governance status."""
+    return jsonify(p54_game_market_calibration.build_production_report())
+
+
 @tracker_bp.route("/api/game-calibration/promote", methods=["POST"])
 @tracker_bp.route("/api/tracker/game-calibration-promote", methods=["POST"])
 @limiter.limit(5, 60, key="user")
@@ -214,6 +223,51 @@ def api_game_calibration_rollback():
         confirmation=str(payload["confirmation"]),
         actor=actor,
     )
+    return (jsonify(result), 200) if result.get("ok") else (jsonify(result), 400)
+
+
+@tracker_bp.route("/api/game-market-calibration/promote", methods=["POST"])
+@tracker_bp.route("/api/tracker/game-market-calibration-promote", methods=["POST"])
+@limiter.limit(5, 60, key="user")
+@require_roles("owner")
+def api_game_market_calibration_promote():
+    payload = json_body(
+        allowed={"market", "candidateId", "confirmation"},
+        required={"market", "candidateId", "confirmation"},
+    )
+    actor = str((session.get("user") or {}).get("username") or "owner")
+    try:
+        result = p54_game_market_calibration.promote_candidate(
+            str(payload["market"]),
+            str(payload["candidateId"]),
+            confirmation=str(payload["confirmation"]),
+            actor=actor,
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "code": "INVALID_MARKET", "error": str(exc)}), 400
+    if result.get("ok"):
+        return jsonify(result)
+    return jsonify(result), 409 if result.get("code") == "PROMOTION_GATE_FAILED" else 400
+
+
+@tracker_bp.route("/api/game-market-calibration/rollback", methods=["POST"])
+@tracker_bp.route("/api/tracker/game-market-calibration-rollback", methods=["POST"])
+@limiter.limit(5, 60, key="user")
+@require_roles("owner")
+def api_game_market_calibration_rollback():
+    payload = json_body(
+        allowed={"market", "confirmation"},
+        required={"market", "confirmation"},
+    )
+    actor = str((session.get("user") or {}).get("username") or "owner")
+    try:
+        result = p54_game_market_calibration.rollback_to_baseline(
+            str(payload["market"]),
+            confirmation=str(payload["confirmation"]),
+            actor=actor,
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "code": "INVALID_MARKET", "error": str(exc)}), 400
     return (jsonify(result), 200) if result.get("ok") else (jsonify(result), 400)
 
 
