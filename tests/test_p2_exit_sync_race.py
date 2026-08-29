@@ -39,6 +39,7 @@ def test_completed_latest_sync_passes():
     ok, details = p2._cache_sync_health(latest, latest, now=now)
     assert ok is True
     assert details["mode"] == "latest-completed"
+    assert details["active_run_stale"] is False
 
 
 def test_active_sync_with_recent_completed_fallback_passes():
@@ -49,15 +50,17 @@ def test_active_sync_with_recent_completed_fallback_passes():
     assert ok is True
     assert details["mode"] == "active-with-recent-completed-fallback"
     assert details["active_run_age_seconds"] == 1440.0
+    assert details["active_run_stale"] is False
 
 
-def test_stale_running_sync_still_blocks():
+def test_stale_running_sync_with_recent_completed_fallback_passes_but_is_flagged():
     now = datetime(2026, 8, 29, 0, 10, tzinfo=UTC)
     active = _sync("running", started_seconds_ago=p2.CACHE_SYNC_RUNNING_MAX_SECONDS + 1)
     completed = _sync("completed", finished_seconds_ago=3600)
     ok, details = p2._cache_sync_health(active, completed, now=now)
-    assert ok is False
-    assert details["mode"] == "active-without-safe-fallback"
+    assert ok is True
+    assert details["mode"] == "stale-active-with-recent-completed-fallback"
+    assert details["active_run_stale"] is True
 
 
 def test_active_sync_without_recent_completed_fallback_blocks():
@@ -67,8 +70,25 @@ def test_active_sync_without_recent_completed_fallback_blocks():
         "completed",
         finished_seconds_ago=p2.CACHE_SYNC_COMPLETED_MAX_SECONDS + 1,
     )
-    ok, _ = p2._cache_sync_health(active, completed, now=now)
+    ok, details = p2._cache_sync_health(active, completed, now=now)
     assert ok is False
+    assert details["mode"] == "active-without-safe-fallback"
+
+
+def test_stale_running_sync_without_recent_completed_fallback_blocks():
+    now = datetime(2026, 8, 29, 0, 10, tzinfo=UTC)
+    active = _sync(
+        "running",
+        started_seconds_ago=p2.CACHE_SYNC_RUNNING_MAX_SECONDS + 600,
+    )
+    completed = _sync(
+        "completed",
+        finished_seconds_ago=p2.CACHE_SYNC_COMPLETED_MAX_SECONDS + 1,
+    )
+    ok, details = p2._cache_sync_health(active, completed, now=now)
+    assert ok is False
+    assert details["mode"] == "active-without-safe-fallback"
+    assert details["active_run_stale"] is True
 
 
 def test_failed_latest_sync_blocks_even_with_prior_success():

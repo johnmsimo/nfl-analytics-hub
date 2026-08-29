@@ -66,12 +66,16 @@ def _cache_sync_health(
     *,
     now: datetime | None = None,
 ) -> tuple[bool, dict[str, Any]]:
-    """Assess cache sync without failing simply because a new run is active.
+    """Assess cache safety without treating stale running metadata as data loss.
 
     The P2 verifier is read-only and can race the hourly cached-data scheduler.
-    A currently running sync is healthy only when it is bounded to the scheduler
-    freshness window and a recent, error-free completed sync still exists.
-    Failed, stale-running, or never-successful states remain blocking.
+    Deployments can also interrupt a scheduler process after it has persisted a
+    ``running`` DataSyncRun, leaving that row behind even though a recent clean
+    completed snapshot is still serving production.  A clean running row may
+    therefore use a recent completed snapshot as the blocking safety fallback.
+    Runs older than the normal two-hour window are still surfaced explicitly as
+    an advisory so a genuinely stuck scheduler remains visible.  Failed runs or
+    running states without a recent clean completed fallback remain blocking.
     """
     latest_status = str(latest_sync.get("status") or "")
     latest_clean = (
@@ -85,6 +89,11 @@ def _cache_sync_health(
     )
     active_age = _age_seconds(latest_sync.get("started_at"), now=now)
     completed_age = _age_seconds(last_completed_sync.get("finished_at"), now=now)
+    active_stale = (
+        latest_status == "running"
+        and active_age is not None
+        and active_age > CACHE_SYNC_RUNNING_MAX_SECONDS
+    )
 
     if latest_status == "completed" and latest_clean:
         ok = True
@@ -93,12 +102,18 @@ def _cache_sync_health(
         ok = (
             latest_clean
             and active_age is not None
-            and active_age <= CACHE_SYNC_RUNNING_MAX_SECONDS
             and completed_clean
             and completed_age is not None
             and completed_age <= CACHE_SYNC_COMPLETED_MAX_SECONDS
         )
-        mode = "active-with-recent-completed-fallback" if ok else "active-without-safe-fallback"
+        if ok:
+            mode = (
+                "stale-active-with-recent-completed-fallback"
+                if active_stale
+                else "active-with-recent-completed-fallback"
+            )
+        else:
+            mode = "active-without-safe-fallback"
     else:
         ok = False
         mode = "unhealthy-latest-sync"
@@ -112,6 +127,7 @@ def _cache_sync_health(
         "error_fingerprint": latest_sync.get("error_fingerprint"),
         "active_run_age_seconds": round(active_age, 1) if active_age is not None else None,
         "active_run_max_seconds": CACHE_SYNC_RUNNING_MAX_SECONDS,
+        "active_run_stale": active_stale,
         "last_completed_status": last_completed_sync.get("status"),
         "last_completed_age_seconds": round(completed_age, 1) if completed_age is not None else None,
         "last_completed_max_seconds": CACHE_SYNC_COMPLETED_MAX_SECONDS,
@@ -193,6 +209,7 @@ def _p21_checks() -> list[dict[str, Any]]:
         and scheduler.get("enabled") is False
     )
     sync_ok, sync_details = _cache_sync_health(latest_sync, last_completed_sync)
+    active_sync_age_ok = not bool(sync_details.get("active_run_stale"))
     player_coverage_ok = int(counts.get("players") or 0) > 0 and int(counts.get("player_identities") or 0) > 0
 
     return [
@@ -210,6 +227,17 @@ def _p21_checks() -> list[dict[str, Any]]:
             },
         ),
         _check("cached_data_sync", sync_ok, sync_details),
+        _check(
+            "cached_data_sync_active_age",
+            active_sync_age_ok,
+            {
+                "status": sync_details.get("status"),
+                "mode": sync_details.get("mode"),
+                "active_run_age_seconds": sync_details.get("active_run_age_seconds"),
+                "active_run_max_seconds": sync_details.get("active_run_max_seconds"),
+            },
+            blocking=False,
+        ),
         _check(
             "player_warehouse_coverage",
             player_coverage_ok,
