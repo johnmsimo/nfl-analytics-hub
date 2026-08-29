@@ -77,14 +77,7 @@ def _reason_list(row: dict[str, Any], market: dict[str, Any]) -> list[str]:
 
 
 def _model_only_moneyline(row: dict[str, Any]) -> dict[str, Any]:
-    """Preserve a P4.0 model decision when no sportsbook event is available.
-
-    P4.1 intentionally leaves ``markets`` empty when an event cannot be matched.
-    That is correct for pricing, but the delivery layer must not erase the model
-    decision completely. This creates an explicitly unpriced, non-actionable
-    moneyline view so P4.5 can surface MODEL opportunities without inventing a
-    sportsbook price, spread, total, edge, EV, or Kelly value.
-    """
+    """Preserve a P4.0 model decision when no sportsbook event is available."""
     selected_side = str(row.get("selectedSide") or "").lower()
     if selected_side not in {"home", "away"}:
         home_probability = _num(row.get("homeWinProbability"))
@@ -94,11 +87,7 @@ def _model_only_moneyline(row: dict[str, Any]) -> dict[str, Any]:
         selected_team = row.get("homeTeam") if selected_side == "home" else row.get("awayTeam")
     probability = _num(row.get("selectedProbability"))
     if probability is None:
-        probability = _num(
-            row.get("homeWinProbability")
-            if selected_side == "home"
-            else row.get("awayWinProbability")
-        )
+        probability = _num(row.get("homeWinProbability") if selected_side == "home" else row.get("awayWinProbability"))
     probability = probability if probability is not None else 0.5
     return {
         "market": "moneyline",
@@ -147,7 +136,14 @@ def flatten_board(board: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             pricing = market.get("pricing") if isinstance(market.get("pricing"), dict) else {}
             best = pricing.get("bestPrice") if isinstance(pricing.get("bestPrice"), dict) else None
-            market_calibration = market.get("calibration") if isinstance(market.get("calibration"), dict) else calibration
+            market_calibration = (
+                market.get("marketCalibration")
+                if isinstance(market.get("marketCalibration"), dict)
+                else market.get("calibration")
+                if isinstance(market.get("calibration"), dict)
+                else calibration
+            )
+            market_source_model_version = market.get("marketModelVersion") or source_model_version
             item = {
                 "gameId": row.get("gameId"),
                 "season": row.get("season"),
@@ -162,10 +158,11 @@ def flatten_board(board: dict[str, Any]) -> list[dict[str, Any]]:
                 "selectedSide": market.get("selectedSide"),
                 "selectedTeam": market.get("selectedTeam"),
                 "line": market.get("line"),
+                "prePromotionProbability": market.get("prePromotionProbability"),
                 "modelProbability": market.get("modelProbability"),
                 "confidenceScore": market.get("confidenceScore"),
                 "decisionGrade": market.get("decisionGrade") or "Pass",
-                "sourceModelVersion": source_model_version,
+                "sourceModelVersion": market_source_model_version,
                 "calibration": market_calibration,
                 "quoteStatus": pricing.get("quoteStatus") or "unpriced",
                 "priceStatus": pricing.get("priceStatus") or "unpriced",
@@ -292,12 +289,7 @@ def game_delivery(delivery: dict[str, Any], game_id: str) -> dict[str, Any]:
         state = "model-only"
     else:
         state = "unavailable"
-    return {
-        "gameId": game_id,
-        "state": state,
-        "picks": picks,
-        "markets": rows,
-    }
+    return {"gameId": game_id, "state": state, "picks": picks, "markets": rows}
 
 
 def verify_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
