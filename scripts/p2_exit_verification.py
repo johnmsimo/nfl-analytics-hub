@@ -21,6 +21,9 @@ from routes.current_api import ALIASES
 from scripts.p21_production_preview import build_preview
 from security import validate_auth_configuration
 
+CACHE_SYNC_RUNNING_MAX_SECONDS = 7200.0
+CACHE_SYNC_COMPLETED_MAX_SECONDS = 129600.0
+
 
 def _check(
     name: str,
@@ -34,6 +37,86 @@ def _check(
         "passed": bool(passed),
         "blocking": blocking,
         "details": details,
+    }
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _age_seconds(value: Any, *, now: datetime | None = None) -> float | None:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return None
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    return max(0.0, (current - parsed).total_seconds())
+
+
+def _cache_sync_health(
+    latest_sync: dict[str, Any],
+    last_completed_sync: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Assess cache sync without failing simply because a new run is active.
+
+    The P2 verifier is read-only and can race the hourly cached-data scheduler.
+    A currently running sync is healthy only when it is bounded to the scheduler
+    freshness window and a recent, error-free completed sync still exists.
+    Failed, stale-running, or never-successful states remain blocking.
+    """
+    latest_status = str(latest_sync.get("status") or "")
+    latest_clean = (
+        latest_sync.get("error_category") is None
+        and latest_sync.get("error_fingerprint") is None
+    )
+    completed_clean = (
+        last_completed_sync.get("status") == "completed"
+        and last_completed_sync.get("error_category") is None
+        and last_completed_sync.get("error_fingerprint") is None
+    )
+    active_age = _age_seconds(latest_sync.get("started_at"), now=now)
+    completed_age = _age_seconds(last_completed_sync.get("finished_at"), now=now)
+
+    if latest_status == "completed" and latest_clean:
+        ok = True
+        mode = "latest-completed"
+    elif latest_status == "running":
+        ok = (
+            latest_clean
+            and active_age is not None
+            and active_age <= CACHE_SYNC_RUNNING_MAX_SECONDS
+            and completed_clean
+            and completed_age is not None
+            and completed_age <= CACHE_SYNC_COMPLETED_MAX_SECONDS
+        )
+        mode = "active-with-recent-completed-fallback" if ok else "active-without-safe-fallback"
+    else:
+        ok = False
+        mode = "unhealthy-latest-sync"
+
+    return ok, {
+        "status": latest_sync.get("status"),
+        "mode": mode,
+        "records_read": latest_sync.get("records_read"),
+        "records_written": latest_sync.get("records_written"),
+        "error_category": latest_sync.get("error_category"),
+        "error_fingerprint": latest_sync.get("error_fingerprint"),
+        "active_run_age_seconds": round(active_age, 1) if active_age is not None else None,
+        "active_run_max_seconds": CACHE_SYNC_RUNNING_MAX_SECONDS,
+        "last_completed_status": last_completed_sync.get("status"),
+        "last_completed_age_seconds": round(completed_age, 1) if completed_age is not None else None,
+        "last_completed_max_seconds": CACHE_SYNC_COMPLETED_MAX_SECONDS,
+        "last_completed_error_category": last_completed_sync.get("error_category"),
+        "last_completed_error_fingerprint": last_completed_sync.get("error_fingerprint"),
     }
 
 
@@ -92,6 +175,7 @@ def _schedule_checks() -> list[dict[str, Any]]:
 def _p21_checks() -> list[dict[str, Any]]:
     preview = build_preview()
     latest_sync = preview.get("latest_cached_data_sync") or {}
+    last_completed_sync = preview.get("last_completed_cached_data_sync") or {}
     identity = preview.get("identity_reconciliation") or {}
     retention = preview.get("warehouse_retention") or {}
     deleted = retention.get("deleted") or {}
@@ -108,11 +192,7 @@ def _p21_checks() -> list[dict[str, Any]]:
         and not any(int(value or 0) for value in deleted.values())
         and scheduler.get("enabled") is False
     )
-    sync_ok = (
-        latest_sync.get("status") == "completed"
-        and latest_sync.get("error_category") is None
-        and latest_sync.get("error_fingerprint") is None
-    )
+    sync_ok, sync_details = _cache_sync_health(latest_sync, last_completed_sync)
     player_coverage_ok = int(counts.get("players") or 0) > 0 and int(counts.get("player_identities") or 0) > 0
 
     return [
@@ -129,17 +209,7 @@ def _p21_checks() -> list[dict[str, Any]]:
                 "retention_scheduler_enabled": scheduler.get("enabled"),
             },
         ),
-        _check(
-            "cached_data_sync",
-            sync_ok,
-            {
-                "status": latest_sync.get("status"),
-                "records_read": latest_sync.get("records_read"),
-                "records_written": latest_sync.get("records_written"),
-                "error_category": latest_sync.get("error_category"),
-                "error_fingerprint": latest_sync.get("error_fingerprint"),
-            },
-        ),
+        _check("cached_data_sync", sync_ok, sync_details),
         _check(
             "player_warehouse_coverage",
             player_coverage_ok,
