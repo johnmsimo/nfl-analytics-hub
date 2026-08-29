@@ -1,0 +1,97 @@
+name: P5.9 Calibration Portfolio Operations Console Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Confirm zero-credit, zero-write P5.9 portfolio console verification
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_CALIBRATION_PORTFOLIO_CONSOLE_VERIFY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p59-calibration-portfolio-operations-console-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: inputs.confirmation == 'RUN_CALIBRATION_PORTFOLIO_CONSOLE_VERIFY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate P5.9 portfolio console safety controls
+        shell: bash
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirmation }}" = "RUN_CALIBRATION_PORTFOLIO_CONSOLE_VERIFY"
+          PAGE=static/p59_calibration_portfolio_operations.html
+          test -f "$PAGE"
+          grep -q 'P5.9 · Calibration Portfolio Operations Console' "$PAGE"
+          grep -q '/api/game-calibration/portfolio-control-plane' "$PAGE"
+          grep -q 'No promotion or rollback runs on page load or refresh' "$PAGE"
+          grep -q 'command.endpoint' "$PAGE"
+          grep -q 'input.value!==command.confirmation' "$PAGE"
+          grep -q 'if(!confirm(prompt))return' "$PAGE"
+          ! grep -q '/api/game-calibration/promote' "$PAGE"
+          ! grep -q '/api/game-calibration/rollback' "$PAGE"
+          ! grep -q '/api/game-market-calibration/promote' "$PAGE"
+          ! grep -q '/api/game-market-calibration/rollback' "$PAGE"
+
+      - name: Verify production readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(mktemp)"
+          trap 'rm -f "$BODY"' EXIT
+          set +e
+          HTTP_CODE=$(curl --silent --show-error --fail-with-body \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            --output "$BODY" --write-out "%{http_code}" \
+            https://nfl-analytics-hub.fly.dev/ready)
+          CURL_RC=$?
+          set -e
+          echo "Public /ready HTTP status: ${HTTP_CODE:-unknown}"
+          if [ -s "$BODY" ]; then
+            cat "$BODY"
+            echo
+          fi
+          if [ "$CURL_RC" -ne 0 ] || [ "${HTTP_CODE:-000}" != "200" ]; then
+            exit 1
+          fi
+          python - "$BODY" <<'PY'
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload.get("ok"), payload
+          assert payload.get("database") == "ready", payload
+          assert payload.get("schedule", {}).get("ready"), payload
+          PY
+
+      - name: Run sanitized P5.9 portfolio console verification
+        shell: bash
+        run: |
+          # Reads P5.8 governance, immutable P4.4 receipts, and append-only
+          # P5.0/P5.4 promotion histories. It also checks the deployed static
+          # console and CSP. No provider refresh, mutation, Tracker write, or bet execution.
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p59_calibration_portfolio_operations_console_verification.py"
+
+      - name: Re-run sanitized P2/P3 safety verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"
