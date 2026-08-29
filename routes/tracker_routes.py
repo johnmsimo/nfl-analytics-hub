@@ -12,6 +12,7 @@ import p38_learning
 import p39_calibration
 import p44_game_decision_ledger
 import p48_game_learning
+import p49_game_calibration
 import tracker
 from security import bounded_number, json_body, limiter
 
@@ -148,6 +149,13 @@ def api_game_ledger_performance():
 def api_game_learning():
     """P4.8 zero-credit, read-only learning report from immutable game receipts."""
     return jsonify(p48_game_learning.build_learning_report())
+
+
+@tracker_bp.route("/api/game-calibration/challenger")
+@tracker_bp.route("/api/tracker/game-calibration-challenger")
+def api_game_calibration_challenger():
+    """P4.9 read-only forward-holdout game calibration challenger report."""
+    return jsonify(p49_game_calibration.build_production_report())
 
 
 @tracker_bp.route("/api/tracker/learning")
