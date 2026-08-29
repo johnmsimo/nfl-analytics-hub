@@ -1,0 +1,92 @@
+name: P5.4 Game Market Calibration Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Confirm zero-credit, zero-write P5.4 market calibration verification
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_GAME_MARKET_CALIBRATION_VERIFY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p54-game-market-calibration-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: inputs.confirmation == 'RUN_GAME_MARKET_CALIBRATION_VERIFY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate P5.4 market calibration controls
+        shell: bash
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirmation }}" = "RUN_GAME_MARKET_CALIBRATION_VERIFY"
+          grep -q 'MARKETS = ("spread", "total")' p54_game_market_calibration.py
+          grep -q 'PROMOTE_GAME_MARKET_CALIBRATION' p54_game_market_calibration.py
+          grep -q 'ROLLBACK_GAME_MARKET_CALIBRATION' p54_game_market_calibration.py
+          grep -q 'marketIsolatedTraining.*True' p54_game_market_calibration.py
+          grep -q 'automaticPromotion.*False' p54_game_market_calibration.py
+          grep -q 'automaticRollback.*False' p54_game_market_calibration.py
+          grep -q 'marketCalibrationCannotFlipSelectedSide.*True' p41_game_market_pricing.py
+
+      - name: Verify production readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(mktemp)"
+          trap 'rm -f "$BODY"' EXIT
+          set +e
+          HTTP_CODE=$(curl --silent --show-error --fail-with-body \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            --output "$BODY" --write-out "%{http_code}" \
+            https://nfl-analytics-hub.fly.dev/ready)
+          CURL_RC=$?
+          set -e
+          echo "Public /ready HTTP status: ${HTTP_CODE:-unknown}"
+          if [ -s "$BODY" ]; then
+            cat "$BODY"
+            echo
+          fi
+          if [ "$CURL_RC" -ne 0 ] || [ "${HTTP_CODE:-000}" != "200" ]; then
+            exit 1
+          fi
+          python - "$BODY" <<'PY'
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload.get("ok"), payload
+          assert payload.get("database") == "ready", payload
+          assert payload.get("schedule", {}).get("ready"), payload
+          PY
+
+      - name: Run sanitized P5.4 game market calibration verification
+        shell: bash
+        run: |
+          # Reads immutable P4.4 receipts and P5.4 append-only promotion history.
+          # Synthetic promotion tests use persist=False. No provider refresh,
+          # ledger write, promotion/rollback write, Tracker write, or bet execution.
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p54_game_market_calibration_verification.py"
+
+      - name: Re-run sanitized P2/P3 safety verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"
