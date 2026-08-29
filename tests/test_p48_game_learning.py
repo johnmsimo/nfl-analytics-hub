@@ -155,3 +155,22 @@ def test_build_learning_report_fails_closed_when_game_ledger_is_unavailable(monk
     assert report["available"] is False
     assert report["state"] == "unavailable"
     assert report["autoApply"] is False
+
+
+def test_game_learning_route_exposes_read_only_report(client, monkeypatch):
+    monkeypatch.setattr(
+        p48,
+        "build_learning_report",
+        lambda: {
+            "available": True,
+            "state": "collecting",
+            "gradedCalibrationSamples": 0,
+            "autoApply": False,
+            "safetyContract": {"readOnly": True, "providerRequests": 0},
+        },
+    )
+    response = client.get("/api/game-learning/report")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["state"] == "collecting"
+    assert payload["safetyContract"]["providerRequests"] == 0
