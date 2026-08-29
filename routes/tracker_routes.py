@@ -11,6 +11,7 @@ import decision_ledger
 import p38_learning
 import p39_calibration
 import p44_game_decision_ledger
+import p48_game_learning
 import tracker
 from security import bounded_number, json_body, limiter
 
@@ -140,6 +141,13 @@ def api_game_ledger():
 @tracker_bp.route("/api/tracker/game-ledger/performance")
 def api_game_ledger_performance():
     return jsonify(p44_game_decision_ledger.performance_summary())
+
+
+@tracker_bp.route("/api/game-learning/report")
+@tracker_bp.route("/api/tracker/game-learning")
+def api_game_learning():
+    """P4.8 zero-credit, read-only learning report from immutable game receipts."""
+    return jsonify(p48_game_learning.build_learning_report())
 
 
 @tracker_bp.route("/api/tracker/learning")
