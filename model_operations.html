@@ -21,12 +21,13 @@
     .ops-output pre{white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#bdd0ef}
     .ops-note{padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.04);color:var(--mu);font-size:12px}
     .ops-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:rgba(139,92,246,.16);color:#c3b3ff;font-size:11px;font-weight:900}
-    .cal-wrap{margin-bottom:18px;padding:15px}.cal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.cal-head h2{margin:0;font-size:17px}.cal-head p{margin:5px 0 0;color:var(--mu);font-size:11px;max-width:760px}.cal-state{display:inline-flex;align-items:center;border:1px solid var(--b);border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase;color:var(--cyan)}.cal-state.review,.cal-state.rollback-review{color:var(--warn)}.cal-state.champion-healthy{color:var(--g)}
+    .cal-wrap{margin-bottom:18px;padding:15px}.cal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.cal-head h2{margin:0;font-size:17px}.cal-head p{margin:5px 0 0;color:var(--mu);font-size:11px;max-width:760px}.cal-state{display:inline-flex;align-items:center;border:1px solid var(--b);border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase;color:var(--cyan)}.cal-state.review,.cal-state.rollback-review,.cal-state.promotion-review{color:var(--warn)}.cal-state.champion-healthy,.cal-state.champions-healthy{color:var(--g)}
     .cal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.cal-metric{padding:10px;border:1px solid var(--b);border-radius:10px;background:var(--card3)}.cal-metric span{display:block;color:var(--mu);font-size:9px;text-transform:uppercase;letter-spacing:.05em}.cal-metric b{display:block;margin-top:4px;font-size:13px;word-break:break-word}.cal-decision{margin-top:10px;padding:12px;border:1px solid var(--b);border-radius:10px;background:rgba(34,211,238,.035)}.cal-decision strong{display:block;font-size:12px}.cal-decision p{margin:5px 0 0;color:var(--mu);font-size:10px;line-height:1.5}.cal-blockers{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.cal-chip{border:1px solid var(--b);border-radius:999px;padding:3px 7px;color:var(--mu);font-size:9px}.cal-safety{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.cal-safety .cal-chip{color:var(--g);border-color:rgba(34,197,94,.28)}
     .cal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.cal-action{padding:12px;border:1px solid var(--b);border-radius:10px;background:var(--card3)}.cal-action h3{margin:0;font-size:12px}.cal-action p{margin:5px 0 9px;color:var(--mu);font-size:10px;line-height:1.45}.cal-action code{font-size:9px;color:var(--cyan);word-break:break-all}.cal-action input{width:100%;margin:8px 0;border:1px solid var(--b);background:var(--bg);color:var(--t);border-radius:8px;padding:9px;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}.cal-action .btn{width:100%}.cal-owner{margin-top:8px;color:var(--mu);font-size:9px}.cal-owner.owner{color:var(--g)}.cal-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.cal-toolbar .btn{padding:7px 10px;font-size:10px}
-    @media(max-width:980px){.ops-grid,.cal-grid{grid-template-columns:repeat(2,1fr)}.ops-layout{grid-template-columns:1fr}.ops-form textarea{min-height:220px}}
+    .market-cal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.market-cal-card{padding:12px;border:1px solid var(--b);border-radius:12px;background:var(--card2)}.market-cal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.market-cal-head h3{margin:0;font-size:14px}.market-cal-card .cal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.market-cal-card .cal-actions{grid-template-columns:1fr}.market-cal-card .cal-decision{min-height:106px}.market-cal-summary{margin-top:8px;color:var(--mu);font-size:10px}
+    @media(max-width:980px){.ops-grid,.cal-grid{grid-template-columns:repeat(2,1fr)}.ops-layout{grid-template-columns:1fr}.ops-form textarea{min-height:220px}.market-cal-grid{grid-template-columns:1fr}}
     @media(max-width:620px){.cal-actions{grid-template-columns:1fr}.cal-head{flex-direction:column}.cal-toolbar{width:100%}.cal-toolbar .btn{flex:1}}
-    @media(max-width:430px){.ops-grid,.cal-grid{grid-template-columns:1fr}.ops-tabs button{min-width:max-content}.ops-output{min-height:300px}}
+    @media(max-width:430px){.ops-grid,.cal-grid,.market-cal-card .cal-grid{grid-template-columns:1fr}.ops-tabs button{min-width:max-content}.ops-output{min-height:300px}}
   </style>
 </head>
 <body>
@@ -35,9 +36,9 @@
     <header class="ai-pagehead">
       <div>
         <h1>Model Operations</h1>
-        <p>Persistent registry, evidence-bound approvals, lifecycle health, calibration governance, alerts, and audit history.</p>
+        <p>Persistent registry, evidence-bound approvals, lifecycle health, moneyline and market calibration governance, alerts, and audit history.</p>
       </div>
-      <span class="ops-badge">P5.3 · v4.3.3</span>
+      <span class="ops-badge">P5.7 · v4.3.3</span>
     </header>
 
     <section class="ai-card cal-wrap" id="calibration-console" aria-label="Game calibration governance">
@@ -89,6 +90,105 @@
       </div>
     </section>
 
+    <section class="ai-card cal-wrap" id="market-calibration-console" aria-label="Spread and total calibration governance">
+      <div class="cal-head">
+        <div>
+          <h2>P5.7 · Spread &amp; Total Calibration Operations Console</h2>
+          <p>One market-isolated human-review surface for P5.4 challenger/champion governance, P5.5 post-promotion guards, and the P5.6 canonical market control plane. No market mutation runs on page load or refresh.</p>
+        </div>
+        <div class="cal-toolbar">
+          <span class="cal-state" id="market-cal-state">Loading…</span>
+          <button class="btn" type="button" id="market-cal-refresh">Refresh markets</button>
+        </div>
+      </div>
+      <div class="cal-grid">
+        <div class="cal-metric"><span>Recommended action</span><b id="market-cal-recommendation">—</b></div>
+        <div class="cal-metric"><span>Promotion review</span><b id="market-cal-promotion-markets">—</b></div>
+        <div class="cal-metric"><span>Rollback review</span><b id="market-cal-rollback-markets">—</b></div>
+        <div class="cal-metric"><span>Active champions</span><b id="market-cal-active-markets">—</b></div>
+      </div>
+      <div class="cal-decision">
+        <strong id="market-cal-message">Loading canonical P5.6 market control-plane decision…</strong>
+        <p id="market-cal-summary">Spread and total remain operationally isolated. A state change in one market never authorizes a mutation in the other.</p>
+      </div>
+      <div class="cal-safety">
+        <span class="cal-chip">Zero provider calls</span>
+        <span class="cal-chip">Market-isolated governance</span>
+        <span class="cal-chip">No automatic promotion</span>
+        <span class="cal-chip">No automatic rollback</span>
+        <span class="cal-chip">Owner confirmation required</span>
+        <span class="cal-chip">No selected-side changes</span>
+        <span class="cal-chip">No wager execution</span>
+      </div>
+      <div class="market-cal-grid">
+        <section class="market-cal-card" id="market-spread-card" data-market="spread">
+          <div class="market-cal-head"><h3>Spread calibration</h3><span class="cal-state" id="market-spread-state">Loading…</span></div>
+          <div class="cal-grid">
+            <div class="cal-metric"><span>Recommended</span><b id="market-spread-recommendation">—</b></div>
+            <div class="cal-metric"><span>Champion</span><b id="market-spread-champion">—</b></div>
+            <div class="cal-metric"><span>Challenger graded</span><b id="market-spread-challenger-samples">—</b></div>
+            <div class="cal-metric"><span>Guard graded</span><b id="market-spread-guard-samples">—</b></div>
+          </div>
+          <div class="cal-decision">
+            <strong id="market-spread-message">Loading spread governance…</strong>
+            <p id="market-spread-evidence">P5.4/P5.5 evidence will appear here.</p>
+            <div class="cal-blockers" id="market-spread-blockers"></div>
+          </div>
+          <div class="cal-actions">
+            <section class="cal-action">
+              <h3>Promote spread challenger</h3>
+              <p>Enabled only when P5.6 says this market is promotion-ready and the signed-in role is owner.</p>
+              <code id="market-spread-promote-token">PROMOTE_GAME_MARKET_CALIBRATION</code>
+              <input id="market-spread-promote-confirm" autocomplete="off" placeholder="Type exact spread promotion confirmation" aria-label="Spread promotion confirmation">
+              <button class="btn primary" id="market-spread-promote-btn" type="button" disabled>Promote spread challenger</button>
+              <div class="cal-owner" id="market-spread-promote-help">Checking owner role and spread readiness…</div>
+            </section>
+            <section class="cal-action">
+              <h3>Rollback spread champion</h3>
+              <p>Enabled only when P5.5 recommends rollback review for spread and P5.6 reports rollback-ready.</p>
+              <code id="market-spread-rollback-token">ROLLBACK_GAME_MARKET_CALIBRATION</code>
+              <input id="market-spread-rollback-confirm" autocomplete="off" placeholder="Type exact spread rollback confirmation" aria-label="Spread rollback confirmation">
+              <button class="btn" id="market-spread-rollback-btn" type="button" disabled>Rollback spread to baseline</button>
+              <div class="cal-owner" id="market-spread-rollback-help">Checking owner role and spread guard…</div>
+            </section>
+          </div>
+        </section>
+
+        <section class="market-cal-card" id="market-total-card" data-market="total">
+          <div class="market-cal-head"><h3>Total calibration</h3><span class="cal-state" id="market-total-state">Loading…</span></div>
+          <div class="cal-grid">
+            <div class="cal-metric"><span>Recommended</span><b id="market-total-recommendation">—</b></div>
+            <div class="cal-metric"><span>Champion</span><b id="market-total-champion">—</b></div>
+            <div class="cal-metric"><span>Challenger graded</span><b id="market-total-challenger-samples">—</b></div>
+            <div class="cal-metric"><span>Guard graded</span><b id="market-total-guard-samples">—</b></div>
+          </div>
+          <div class="cal-decision">
+            <strong id="market-total-message">Loading total governance…</strong>
+            <p id="market-total-evidence">P5.4/P5.5 evidence will appear here.</p>
+            <div class="cal-blockers" id="market-total-blockers"></div>
+          </div>
+          <div class="cal-actions">
+            <section class="cal-action">
+              <h3>Promote total challenger</h3>
+              <p>Enabled only when P5.6 says this market is promotion-ready and the signed-in role is owner.</p>
+              <code id="market-total-promote-token">PROMOTE_GAME_MARKET_CALIBRATION</code>
+              <input id="market-total-promote-confirm" autocomplete="off" placeholder="Type exact total promotion confirmation" aria-label="Total promotion confirmation">
+              <button class="btn primary" id="market-total-promote-btn" type="button" disabled>Promote total challenger</button>
+              <div class="cal-owner" id="market-total-promote-help">Checking owner role and total readiness…</div>
+            </section>
+            <section class="cal-action">
+              <h3>Rollback total champion</h3>
+              <p>Enabled only when P5.5 recommends rollback review for total and P5.6 reports rollback-ready.</p>
+              <code id="market-total-rollback-token">ROLLBACK_GAME_MARKET_CALIBRATION</code>
+              <input id="market-total-rollback-confirm" autocomplete="off" placeholder="Type exact total rollback confirmation" aria-label="Total rollback confirmation">
+              <button class="btn" id="market-total-rollback-btn" type="button" disabled>Rollback total to baseline</button>
+              <div class="cal-owner" id="market-total-rollback-help">Checking owner role and total guard…</div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
+
     <section class="ops-grid" aria-label="Lifecycle status">
       <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Registry</span><b id="kpi-models">—</b></article>
       <article class="ai-card ai-cardpad ops-kpi"><span class="muted">Pending approvals</span><b id="kpi-approvals">—</b></article>
@@ -114,6 +214,7 @@
 document.addEventListener('DOMContentLoaded',async()=>{
  const {$,esc,fetchJSON,shell,toast}=NFLHub;shell('models');
  const panels=['registry','approvals','health','audit'];
+ const marketKeys=['spread','total'];
  const examples={
   registry:{actions:{
    'List versions':{method:'GET',endpoint:'/api/v4.3/operations/registry/versions',payload:null},
@@ -132,17 +233,24 @@ document.addEventListener('DOMContentLoaded',async()=>{
    'Recent events':{method:'GET',endpoint:'/api/v4.3/operations/audit?limit=100',payload:null}
   },note:'Audit history is append-only and payload-bounded. It records mutations, actors, evidence references, and sequence.'}
  };
- let active='registry',calibration=null,sessionInfo=null;
+ let active='registry',calibration=null,marketCalibration=null,sessionInfo=null;
  $('#ops-tabs').innerHTML=panels.map(id=>`<button type="button" data-id="${id}">${id[0].toUpperCase()+id.slice(1)}</button>`).join('');
  $('#ops-tabs').onclick=e=>{const b=e.target.closest('[data-id]');if(b)activate(b.dataset.id)};
  $('#action').onchange=fillAction;
  $('#ops-form').onsubmit=run;
  $('#cal-refresh').onclick=loadCalibration;
+ $('#market-cal-refresh').onclick=loadMarketCalibration;
  $('#promote-confirm').oninput=syncCalibrationButtons;
  $('#rollback-confirm').oninput=syncCalibrationButtons;
  $('#promote-btn').onclick=()=>runCalibrationMutation('promotion');
  $('#rollback-btn').onclick=()=>runCalibrationMutation('rollback');
- await Promise.all([refreshStatus(),loadCalibration()]);activate(active);
+ for(const market of marketKeys){
+  $(`#market-${market}-promote-confirm`).oninput=()=>syncMarketCalibrationButtons(market);
+  $(`#market-${market}-rollback-confirm`).oninput=()=>syncMarketCalibrationButtons(market);
+  $(`#market-${market}-promote-btn`).onclick=()=>runMarketCalibrationMutation(market,'promotion');
+  $(`#market-${market}-rollback-btn`).onclick=()=>runMarketCalibrationMutation(market,'rollback');
+ }
+ await Promise.all([refreshStatus(),loadCalibration(),loadMarketCalibration()]);activate(active);
  function activate(id){
   active=id;document.querySelectorAll('#ops-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.id===id));
   $('#action').innerHTML=Object.keys(examples[id].actions).map(x=>`<option>${esc(x)}</option>`).join('');
@@ -225,6 +333,72 @@ document.addEventListener('DOMContentLoaded',async()=>{
    await loadCalibration();
   }catch(err){toast(err.message);await loadCalibration()}
   finally{button.textContent=kind==='promotion'?'Promote challenger':'Rollback to baseline';syncCalibrationButtons()}
+ }
+ async function loadMarketCalibration(){
+  $('#market-cal-refresh').disabled=true;$('#market-cal-state').textContent='Loading…';
+  try{
+   const [control,auth]=await Promise.all([fetchJSON('/api/game-market-calibration/control-plane'),fetchJSON('/api/auth/session')]);
+   marketCalibration=control;sessionInfo=auth;renderMarketCalibration();
+  }catch(err){
+   marketCalibration=null;$('#market-cal-state').textContent='Unavailable';$('#market-cal-message').textContent=`Market calibration control plane unavailable: ${err.message}`;
+   $('#market-cal-summary').textContent='No spread or total promotion/rollback action is available while the P5.6 governance state cannot be loaded.';
+   for(const market of marketKeys)syncMarketCalibrationButtons(market);
+  }finally{$('#market-cal-refresh').disabled=false}
+ }
+ function renderMarketCalibration(){
+  const c=marketCalibration||{};
+  const state=String(c.state||'unavailable');$('#market-cal-state').textContent=state.replaceAll('-',' ');$('#market-cal-state').className=`cal-state ${state}`;
+  $('#market-cal-recommendation').textContent=String(c.recommendedAction||'—').replaceAll('_',' ');
+  $('#market-cal-promotion-markets').textContent=(c.promotionReviewMarkets||[]).join(', ')||'None';
+  $('#market-cal-rollback-markets').textContent=(c.rollbackReviewMarkets||[]).join(', ')||'None';
+  $('#market-cal-active-markets').textContent=(c.activeChampionMarkets||[]).join(', ')||'None';
+  $('#market-cal-message').textContent=c.message||'No canonical P5.6 market decision is available.';
+  $('#market-cal-summary').textContent=`Collecting: ${(c.collectingMarkets||[]).join(', ')||'none'} · Healthy champions: ${(c.healthyChampionMarkets||[]).join(', ')||'none'} · Spread/total governance remains isolated.`;
+  for(const market of marketKeys)renderMarketCalibrationMarket(market);
+ }
+ function renderMarketCalibrationMarket(market){
+  const c=marketCalibration?.markets?.[market]||{},ev=c.evidence||{},role=String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase();
+  const get=name=>$(`#market-${market}-${name}`),state=String(c.state||'unavailable');
+  get('state').textContent=state.replaceAll('-',' ');get('state').className=`cal-state ${state}`;
+  get('recommendation').textContent=String(c.recommendedAction||'—').replaceAll('_',' ');
+  get('champion').textContent=c.championApplied?(c.championCandidateId||'promoted'):'Baseline';
+  get('challenger-samples').textContent=ev.challengerGradedSamples??0;get('guard-samples').textContent=ev.guardGradedSamples??0;
+  get('message').textContent=c.message||`No canonical ${market} calibration decision is available.`;
+  get('evidence').textContent=`P5.4 ${ev.challengerState||'—'} · promotion eligible ${ev.promotionEligible===true?'yes':'no'} · P5.5 ${ev.guardState||'—'} · rollback recommended ${ev.rollbackRecommended===true?'yes':'no'}.`;
+  const blockers=c.blockers||[];get('blockers').innerHTML=blockers.length?blockers.map(x=>`<span class="cal-chip">${esc(String(x).replaceAll('_',' '))}</span>`).join(''):'<span class="cal-chip">No active blockers for this market state</span>';
+  get('promote-token').textContent=c.commands?.promotion?.confirmation||'PROMOTE_GAME_MARKET_CALIBRATION';
+  get('rollback-token').textContent=c.commands?.rollback?.confirmation||'ROLLBACK_GAME_MARKET_CALIBRATION';
+  get('promote-help').textContent=role==='owner'?(c.promoteReady?`Owner verified · candidate ${c.candidateId}`:`Owner verified · ${market} promotion is not currently eligible`):`Role ${role||'unknown'} · owner required`;
+  get('rollback-help').textContent=role==='owner'?(c.rollbackReady?`Owner verified · P5.5 recommends ${market} rollback review`:`Owner verified · ${market} rollback is not currently recommended`):`Role ${role||'unknown'} · owner required`;
+  get('promote-help').classList.toggle('owner',role==='owner');get('rollback-help').classList.toggle('owner',role==='owner');
+  syncMarketCalibrationButtons(market);
+ }
+ function syncMarketCalibrationButtons(market){
+  const c=marketCalibration?.markets?.[market]||{},role=String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase(),owner=role==='owner';
+  const promoteToken=c.commands?.promotion?.confirmation||'PROMOTE_GAME_MARKET_CALIBRATION';
+  const rollbackToken=c.commands?.rollback?.confirmation||'ROLLBACK_GAME_MARKET_CALIBRATION';
+  $(`#market-${market}-promote-btn`).disabled=!(owner&&c.promoteReady===true&&$(`#market-${market}-promote-confirm`).value===promoteToken);
+  $(`#market-${market}-rollback-btn`).disabled=!(owner&&c.rollbackReady===true&&$(`#market-${market}-rollback-confirm`).value===rollbackToken);
+ }
+ async function runMarketCalibrationMutation(market,kind){
+  const c=marketCalibration?.markets?.[market]||{},command=c.commands?.[kind]||{},role=String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase();
+  if(role!=='owner'){toast('Owner role required');return}
+  if(kind==='promotion'&&c.promoteReady!==true){toast(`${market} promotion is not eligible`);return}
+  if(kind==='rollback'&&c.rollbackReady!==true){toast(`${market} rollback is not recommended by P5.5`);return}
+  const input=$(`#market-${market}-${kind==='promotion'?'promote':'rollback'}-confirm`);
+  if(input.value!==command.confirmation){toast('Exact confirmation token required');return}
+  const candidate=kind==='promotion'?c.candidateId:null;
+  const text=kind==='promotion'?`Promote ${market} calibration candidate ${candidate}? This changes production ${market} probabilities but cannot change the selected side.`:`Rollback the promoted ${market} calibration champion to the P4.1 baseline?`;
+  if(!confirm(text))return;
+  const button=$(`#market-${market}-${kind==='promotion'?'promote':'rollback'}-btn`);button.disabled=true;button.textContent=kind==='promotion'?`Promoting ${market}…`:`Rolling back ${market}…`;
+  try{
+   const body=kind==='promotion'?{market,candidateId:candidate,confirmation:command.confirmation}:{market,confirmation:command.confirmation};
+   const result=await fetchJSON(command.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+   toast(kind==='promotion'?`${market} calibration champion promoted`:`${market} calibration champion rolled back`);input.value='';
+   $('#ops-output-title').textContent=`${market[0].toUpperCase()+market.slice(1)} calibration governance mutation`;$('#ops-output').innerHTML=`<pre>${esc(JSON.stringify(result,null,2))}</pre>`;
+   await loadMarketCalibration();
+  }catch(err){toast(err.message);await loadMarketCalibration()}
+  finally{button.textContent=kind==='promotion'?`Promote ${market} challenger`:`Rollback ${market} to baseline`;syncMarketCalibrationButtons(market)}
  }
 });
 </script>
