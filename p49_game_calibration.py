@@ -80,6 +80,7 @@ def _sample(receipt: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "receiptId": str(receipt.get("receiptId") or ""),
         "releasedAt": str(receipt.get("releasedAt") or ""),
+        "gameId": str(release.get("gameId") or ""),
         "probability": probability,
         "marketProbability": _bounded_probability(release.get("fairMarketProbability")),
         "outcome": 1.0 if grade == "win" else 0.0,
@@ -227,6 +228,53 @@ def _market_segments(
     }
 
 
+def _split_forward_holdout(
+    samples: list[dict[str, Any]], target_validation_count: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None, bool]:
+    """Split chronologically without leaking publication batches or games."""
+    if len(samples) < 2:
+        return [], list(samples), None, False
+    target = min(max(1, int(target_validation_count)), len(samples) - 1)
+    boundary = len(samples) - target
+
+    boundary_time = samples[boundary]["releasedAt"]
+    while boundary > 0 and samples[boundary - 1]["releasedAt"] == boundary_time:
+        boundary -= 1
+
+    while boundary > 0:
+        validation_games = {
+            row["gameId"] for row in samples[boundary:] if row.get("gameId")
+        }
+        crossing_indexes = [
+            idx
+            for idx, row in enumerate(samples[:boundary])
+            if row.get("gameId") and row["gameId"] in validation_games
+        ]
+        if not crossing_indexes:
+            break
+        boundary = min(crossing_indexes)
+        boundary_time = samples[boundary]["releasedAt"]
+        while boundary > 0 and samples[boundary - 1]["releasedAt"] == boundary_time:
+            boundary -= 1
+
+    if boundary <= 0:
+        return [], list(samples), samples[0]["releasedAt"] if samples else None, False
+
+    train = samples[:boundary]
+    validation = samples[boundary:]
+    train_games = {row["gameId"] for row in train if row.get("gameId")}
+    validation_games = {
+        row["gameId"] for row in validation if row.get("gameId")
+    }
+    forward_integrity = (
+        bool(train)
+        and bool(validation)
+        and train[-1]["releasedAt"] < validation[0]["releasedAt"]
+        and train_games.isdisjoint(validation_games)
+    )
+    return train, validation, validation[0]["releasedAt"], forward_integrity
+
+
 def build_candidate_report(
     receipts: Iterable[dict[str, Any]],
     *,
@@ -320,14 +368,15 @@ def build_candidate_report(
             },
         }
 
-    validation_count = max(
+    validation_target = max(
         min_validation_samples,
         int(round(len(samples) * (1.0 - train_fraction))),
     )
-    validation_count = min(validation_count, len(samples) - 1)
-    train = samples[:-validation_count]
-    validation = samples[-validation_count:]
-    if not train or len(validation) < min_validation_samples:
+    validation_target = min(validation_target, len(samples) - 1)
+    train, validation, boundary_released_at, forward_integrity = _split_forward_holdout(
+        samples, validation_target
+    )
+    if not train or len(validation) < min_validation_samples or not forward_integrity:
         return {
             **base,
             "state": "collecting",
@@ -336,8 +385,12 @@ def build_candidate_report(
                 "eligible": False,
                 "requiresHumanReview": True,
                 "automaticApply": False,
-                "reason": "insufficient_validation_samples",
-                "checks": {},
+                "reason": "insufficient_leakage_safe_validation_split",
+                "checks": {
+                    "forwardHoldoutIntegrity": forward_integrity,
+                    "validationSampleFloor": len(validation)
+                    >= min_validation_samples,
+                },
             },
         }
 
@@ -368,6 +421,7 @@ def build_candidate_report(
     identity = slope == 1.0 and intercept == 0.0
     checks = {
         "nonIdentityCandidate": not identity,
+        "forwardHoldoutIntegrity": forward_integrity,
         "validationSampleFloor": len(validation) >= min_validation_samples,
         "brierImprovement": brier_improvement >= min_brier_improvement,
         "eceRegressionBounded": ece_regression <= max_ece_regression,
@@ -405,7 +459,9 @@ def build_candidate_report(
         "validationMarketBenchmarkSamples": int(
             validation_challenger["marketBenchmarkSamples"] or 0
         ),
-        "validationIsForwardHoldout": True,
+        "validationBoundaryReleasedAt": boundary_released_at,
+        "validationIsForwardHoldout": forward_integrity,
+        "validationPreventsBatchAndGameLeakage": forward_integrity,
     }
     failed_checks = [key for key, passed in checks.items() if not passed]
     return {
