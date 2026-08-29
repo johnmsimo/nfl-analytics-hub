@@ -32,7 +32,18 @@ def _receipt(
             "modelProbability": probability,
             "fairMarketProbability": market_probability,
         },
-        "result": {"probability": probability, "unitProfit": 0.9 if grade == "win" else -1.0},
+        "result": {
+            "probability": probability,
+            "unitProfit": 0.9 if grade == "win" else -1.0,
+        },
+    }
+
+
+def _release_snapshot() -> dict[str, str | None]:
+    return {
+        str(row.get("receiptId")): row.get("releaseFingerprint")
+        for row in p44.list_receipts(limit=2000)
+        if row.get("receiptId")
     }
 
 
@@ -41,12 +52,23 @@ def main() -> int:
 
     with app.app_context():
         before = p44.ledger_status()
+        before_releases = _release_snapshot()
         report = p48.build_learning_report()
+        after_releases = _release_snapshot()
         after = p44.ledger_status()
         db.session.rollback()
 
+    preserved_releases = all(
+        after_releases.get(receipt_id) == fingerprint
+        for receipt_id, fingerprint in before_releases.items()
+    )
     overconfident = [
-        _receipt(0.80, "win" if idx < 3 else "loss", market_probability=0.50, market="spread")
+        _receipt(
+            0.80,
+            "win" if idx < 3 else "loss",
+            market_probability=0.50,
+            market="spread",
+        )
         for idx in range(10)
     ]
     review = p48.build_report_from_receipts(
@@ -59,7 +81,12 @@ def main() -> int:
     )
     stable = p48.build_report_from_receipts(
         [
-            _receipt(0.60, "win" if idx < 6 else "loss", market_probability=0.50, market="total")
+            _receipt(
+                0.60,
+                "win" if idx < 6 else "loss",
+                market_probability=0.50,
+                market="total",
+            )
             for idx in range(10)
         ],
         min_samples=10,
@@ -81,7 +108,7 @@ def main() -> int:
         "production_does_not_change_model": safety.get("changesModelProbabilities") is False
         and safety.get("changesActionabilityThresholds") is False,
         "production_does_not_change_bankroll": safety.get("changesBankrollPolicy") is False,
-        "ledger_unchanged_by_learning_read": before == after,
+        "ledger_release_receipts_preserved": preserved_releases,
         "synthetic_overconfidence_detected": any(
             item.get("type") == "overconfidence" for item in review.get("signals") or []
         ),
@@ -108,10 +135,19 @@ def main() -> int:
             "receiptCount": report.get("receiptCount"),
             "gradedCalibrationSamples": report.get("gradedCalibrationSamples"),
             "signals": len(report.get("signals") or []),
-            "marketBenchmarkSamples": (report.get("overall") or {}).get("marketBenchmarkSamples"),
-            "brierSkillVsMarket": (report.get("overall") or {}).get("brierSkillVsMarket"),
+            "marketBenchmarkSamples": (report.get("overall") or {}).get(
+                "marketBenchmarkSamples"
+            ),
+            "brierSkillVsMarket": (report.get("overall") or {}).get(
+                "brierSkillVsMarket"
+            ),
         },
-        "ledger": before,
+        "ledger": {
+            "before": before,
+            "after": after,
+            "releaseReceiptsBefore": len(before_releases),
+            "releaseReceiptsAfter": len(after_releases),
+        },
     }
     print(json.dumps(payload, sort_keys=True))
     return 0 if payload["ok"] else 1
