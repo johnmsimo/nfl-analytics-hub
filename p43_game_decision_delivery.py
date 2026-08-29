@@ -108,6 +108,7 @@ def _model_only_moneyline(row: dict[str, Any]) -> dict[str, Any]:
         "modelProbability": round(probability, 4),
         "confidenceScore": row.get("confidenceScore"),
         "decisionGrade": row.get("decisionGrade") or "Pass",
+        "calibration": row.get("calibration"),
         "pricing": {
             "side": selected_side,
             "quoteStatus": "unpriced",
@@ -139,11 +140,14 @@ def flatten_board(board: dict[str, Any]) -> list[dict[str, Any]]:
         markets = row.get("markets") if isinstance(row.get("markets"), dict) else {}
         if not markets and row.get("gameId"):
             markets = {"moneyline": _model_only_moneyline(row)}
+        calibration = row.get("calibration") if isinstance(row.get("calibration"), dict) else None
+        source_model_version = row.get("sourceModel") or row.get("modelVersion")
         for key, market in markets.items():
             if not isinstance(market, dict):
                 continue
             pricing = market.get("pricing") if isinstance(market.get("pricing"), dict) else {}
             best = pricing.get("bestPrice") if isinstance(pricing.get("bestPrice"), dict) else None
+            market_calibration = market.get("calibration") if isinstance(market.get("calibration"), dict) else calibration
             item = {
                 "gameId": row.get("gameId"),
                 "season": row.get("season"),
@@ -161,6 +165,8 @@ def flatten_board(board: dict[str, Any]) -> list[dict[str, Any]]:
                 "modelProbability": market.get("modelProbability"),
                 "confidenceScore": market.get("confidenceScore"),
                 "decisionGrade": market.get("decisionGrade") or "Pass",
+                "sourceModelVersion": source_model_version,
+                "calibration": market_calibration,
                 "quoteStatus": pricing.get("quoteStatus") or "unpriced",
                 "priceStatus": pricing.get("priceStatus") or "unpriced",
                 "fairMarketProbability": pricing.get("fairMarketProbability"),
