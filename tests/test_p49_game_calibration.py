@@ -190,3 +190,25 @@ def test_production_report_fails_closed_when_game_ledger_unavailable(monkeypatch
     assert report["state"] == "unavailable"
     assert report["autoApply"] is False
     assert report["productionApplied"] is False
+
+
+def test_game_calibration_route_exposes_read_only_governance(client, monkeypatch):
+    monkeypatch.setattr(
+        p49,
+        "build_production_report",
+        lambda: {
+            "available": True,
+            "state": "collecting",
+            "gradedSamples": 0,
+            "autoApply": False,
+            "productionApplied": False,
+            "promotionGate": {"eligible": False, "automaticApply": False},
+            "safetyContract": {"readOnly": True, "providerRequests": 0},
+        },
+    )
+    response = client.get("/api/game-calibration/challenger")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["state"] == "collecting"
+    assert payload["promotionGate"]["automaticApply"] is False
+    assert payload["safetyContract"]["providerRequests"] == 0
