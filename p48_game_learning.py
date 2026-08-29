@@ -231,7 +231,7 @@ def _signals(
         if (
             paired >= min_segment_samples
             and isinstance(skill, (int, float))
-            and skill < -market_skill_alert
+            and skill <= -market_skill_alert
         ):
             signals.append(
                 {
