@@ -7,7 +7,9 @@ and Kelly are evaluated independently for each market.
 
 The default/verification paths can use persisted game-odds snapshots with zero
 provider spend. Explicit ``live`` mode is the only P4.1 path that force-refreshes
-The Odds API.
+The Odds API. P5.4 may apply an explicitly owner-promoted market-specific
+calibration champion to spread/total selected-side probabilities; the selected
+side and all P4.1 actionability thresholds remain unchanged.
 """
 from __future__ import annotations
 
@@ -253,6 +255,24 @@ def _total_over_probability(model_total: float, total_point: float) -> float:
     return _clamp(1.0 - _normal_cdf((total_point - model_total) / TOTAL_SD), 0.02, 0.98)
 
 
+def _market_calibration(market: str, selected_probability: float) -> dict[str, Any]:
+    """Lazy-load P5.4 to keep the P4.4 -> P4.3 -> P4.2 -> P4.1 chain acyclic."""
+    try:
+        from p54_game_market_calibration import apply_to_selected_probability
+
+        return apply_to_selected_probability(market, selected_probability)
+    except Exception:  # noqa: BLE001 - pricing must fail safely to the raw model
+        return {
+            "probability": float(selected_probability),
+            "rawProbability": float(selected_probability),
+            "applied": False,
+            "market": market,
+            "candidateId": None,
+            "modelVersion": "p54-market-calibration-v1",
+            "championState": "unavailable",
+        }
+
+
 def price_game_decision(
     decision: dict[str, Any],
     event: dict[str, Any] | None,
@@ -276,7 +296,7 @@ def price_game_decision(
     quotes = _flatten_event(event, fetched_at)
     confidence = float(decision.get("confidenceScore") or 0.0)
 
-    # Moneyline
+    # Moneyline calibration remains owned by P5.0/P4.0.
     home_prob = float(decision.get("homeWinProbability") or 0.5)
     ml_side = "home" if home_prob >= 0.5 else "away"
     ml_prob = home_prob if ml_side == "home" else 1.0 - home_prob
@@ -295,52 +315,67 @@ def price_game_decision(
         "actionable": ml_actionable,
     }
 
-    # Spread: only compare books quoting the canonical home spread.
+    # Spread: fit/apply only a spread-specific P5.4 champion after side selection.
     spread_point = _canonical_point(quotes["spread"])
     if spread_point is not None:
         spread_rows = _same_point(quotes["spread"], spread_point)
         home_cover = _spread_home_probability(float(decision.get("modelHomeMargin") or 0.0), spread_point)
         spread_side = "home" if home_cover >= 0.5 else "away"
-        spread_prob = home_cover if spread_side == "home" else 1.0 - home_cover
+        raw_spread_prob = home_cover if spread_side == "home" else 1.0 - home_cover
+        spread_calibration = _market_calibration("spread", raw_spread_prob)
+        spread_prob = _clamp(float(spread_calibration.get("probability") or raw_spread_prob), 0.5, 0.999)
         spread_conf = max(35.0, confidence - 4.0)
-        spread_grade = _market_grade(home_cover, spread_conf)
+        spread_grade = _market_grade(spread_prob, spread_conf)
         spread_pricing = _assess(spread_rows, side=spread_side, opposite="away" if spread_side == "home" else "home", model_probability=spread_prob)
         spread_actionable = spread_grade in {"Strong Play", "Play"} and bool(spread_pricing["actionableValue"])
         selected_line = spread_point if spread_side == "home" else -spread_point
+        market_model_version = MODEL_VERSION
+        if spread_calibration.get("applied") and spread_calibration.get("candidateId"):
+            market_model_version = f"{MODEL_VERSION}+{spread_calibration['candidateId']}"
         out["markets"]["spread"] = {
             "market": "spread",
             "line": round(selected_line, 2),
             "homeMarketPoint": round(spread_point, 2),
             "selectedSide": spread_side,
             "selectedTeam": decision.get("homeTeam") if spread_side == "home" else decision.get("awayTeam"),
+            "prePromotionProbability": round(raw_spread_prob, 4),
             "modelProbability": round(spread_prob, 4),
             "confidenceScore": round(spread_conf, 2),
             "decisionGrade": spread_grade,
+            "marketCalibration": spread_calibration,
+            "marketModelVersion": market_model_version,
             "pricing": spread_pricing,
             "actionable": spread_actionable,
         }
 
-    # Total: transparent pace-free scoring baseline from P4.0 evidence. Confidence
-    # is discounted relative to side markets because P4.0 did not model pace/play count.
+    # Total: fit/apply only a total-specific P5.4 champion after side selection.
     total_point = _canonical_point(quotes["total"])
     expected_total = _expected_total(decision)
     if total_point is not None and expected_total is not None:
         over_prob = _total_over_probability(expected_total, total_point)
         total_side = "over" if over_prob >= 0.5 else "under"
-        total_prob = over_prob if total_side == "over" else 1.0 - over_prob
+        raw_total_prob = over_prob if total_side == "over" else 1.0 - over_prob
+        total_calibration = _market_calibration("total", raw_total_prob)
+        total_prob = _clamp(float(total_calibration.get("probability") or raw_total_prob), 0.5, 0.999)
         total_conf = max(35.0, min(79.0, confidence - 10.0))
-        total_grade = _market_grade(over_prob, total_conf)
+        total_grade = _market_grade(total_prob, total_conf)
         total_rows = _same_point(quotes["total"], total_point)
         total_pricing = _assess(total_rows, side=total_side, opposite="under" if total_side == "over" else "over", model_probability=total_prob)
         total_actionable = total_grade in {"Strong Play", "Play"} and bool(total_pricing["actionableValue"])
+        market_model_version = MODEL_VERSION
+        if total_calibration.get("applied") and total_calibration.get("candidateId"):
+            market_model_version = f"{MODEL_VERSION}+{total_calibration['candidateId']}"
         out["markets"]["total"] = {
             "market": "total",
             "line": round(total_point, 2),
             "modelExpectedTotal": round(expected_total, 2),
             "selectedSide": total_side,
+            "prePromotionProbability": round(raw_total_prob, 4),
             "modelProbability": round(total_prob, 4),
             "confidenceScore": round(total_conf, 2),
             "decisionGrade": total_grade,
+            "marketCalibration": total_calibration,
+            "marketModelVersion": market_model_version,
             "pricing": total_pricing,
             "actionable": total_actionable,
             "risk": "Total confidence is discounted until pace/play-volume modeling is added.",
@@ -428,6 +463,7 @@ def build_week_market_report(
             "pairedFairBookRequired": True,
             "strongPlayOrPlayRequired": True,
             "liveRefreshRequiresExplicitMode": True,
+            "marketCalibrationCannotFlipSelectedSide": True,
         },
     }
 
