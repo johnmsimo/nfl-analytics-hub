@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Calibration Portfolio Operations · NFL Analytics Hub</title>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/app.js" defer></script>
+  <style>
+    .portfolio-page{max-width:1240px;margin:0 auto;padding:18px 14px 42px}.portfolio-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:16px}.portfolio-head h1{margin:0;font-size:24px}.portfolio-head p{margin:6px 0 0;color:var(--mu);font-size:12px;max-width:800px}.portfolio-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.portfolio-state{display:inline-flex;border:1px solid var(--b);border-radius:999px;padding:6px 10px;font-size:10px;font-weight:900;text-transform:uppercase;color:var(--cyan)}.portfolio-state.rollback-review,.portfolio-state.promotion-review{color:var(--warn)}.portfolio-state.champions-healthy{color:var(--g)}
+    .summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.metric{padding:12px;border:1px solid var(--b);border-radius:11px;background:var(--card)}.metric span{display:block;color:var(--mu);font-size:9px;text-transform:uppercase;letter-spacing:.05em}.metric b{display:block;margin-top:5px;font-size:14px;word-break:break-word}.decision{padding:13px;border:1px solid var(--b);border-radius:11px;background:rgba(34,211,238,.035);margin-bottom:14px}.decision strong{font-size:13px}.decision p{margin:6px 0 0;color:var(--mu);font-size:11px;line-height:1.5}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.chip{border:1px solid var(--b);border-radius:999px;padding:4px 8px;font-size:9px;color:var(--mu)}.chip.safe{color:var(--g);border-color:rgba(34,197,94,.28)}
+    .market-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.market-card{padding:13px;border:1px solid var(--b);border-radius:13px;background:var(--card)}.market-head{display:flex;justify-content:space-between;align-items:center;gap:9px}.market-head h2{margin:0;font-size:16px;text-transform:capitalize}.market-state{border:1px solid var(--b);border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;text-transform:uppercase;color:var(--cyan)}.market-state.rollback-review,.market-state.promotion-review{color:var(--warn)}.market-state.champion-healthy,.market-state.healthy{color:var(--g)}.market-metrics{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}.market-metrics .metric{padding:9px;background:var(--card3)}.market-message{margin-top:9px;padding:10px;border:1px solid var(--b);border-radius:9px;background:var(--card3);min-height:92px}.market-message strong{display:block;font-size:11px}.market-message p{margin:5px 0 0;color:var(--mu);font-size:9px;line-height:1.45}.market-actions{display:grid;gap:8px;margin-top:10px}.action{padding:10px;border:1px solid var(--b);border-radius:9px;background:var(--card3)}.action h3{margin:0;font-size:11px}.action p{margin:5px 0;color:var(--mu);font-size:9px;line-height:1.4}.action code{display:block;color:var(--cyan);font-size:8px;word-break:break-all}.action input{width:100%;margin:7px 0;border:1px solid var(--b);background:var(--bg);color:var(--t);border-radius:8px;padding:8px;font:10px ui-monospace,SFMono-Regular,Menlo,monospace}.action .btn{width:100%;font-size:10px}.help{margin-top:6px;color:var(--mu);font-size:8px}.help.owner{color:var(--g)}.back-link{font-size:10px;color:var(--cyan);text-decoration:none}.error{color:var(--warn)}
+    @media(max-width:980px){.market-grid{grid-template-columns:1fr}.summary-grid{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:620px){.portfolio-head{flex-direction:column}.portfolio-toolbar{width:100%}.portfolio-toolbar .btn{flex:1}.summary-grid{grid-template-columns:1fr}.portfolio-page{padding:12px 10px 32px}}
+  </style>
+</head>
+<body>
+<main class="portfolio-page">
+  <header class="portfolio-head">
+    <div>
+      <a class="back-link" href="/model-operations">← Model Operations</a>
+      <h1>P5.9 · Calibration Portfolio Operations Console</h1>
+      <p>One human-review surface for the P5.8 all-market portfolio across moneyline, spread, and total. Lower-layer P5.2/P5.6 gates remain authoritative. No promotion or rollback runs on page load or refresh.</p>
+    </div>
+    <div class="portfolio-toolbar">
+      <span class="portfolio-state" id="portfolio-state">Loading…</span>
+      <button class="btn" type="button" id="portfolio-refresh">Refresh portfolio</button>
+    </div>
+  </header>
+
+  <section class="summary-grid" aria-label="Portfolio calibration status">
+    <div class="metric"><span>Recommended action</span><b id="portfolio-action">—</b></div>
+    <div class="metric"><span>Promotion review</span><b id="portfolio-promotions">—</b></div>
+    <div class="metric"><span>Rollback review</span><b id="portfolio-rollbacks">—</b></div>
+    <div class="metric"><span>Active champions</span><b id="portfolio-champions">—</b></div>
+  </section>
+
+  <section class="decision">
+    <strong id="portfolio-message">Loading canonical P5.8 portfolio decision…</strong>
+    <p id="portfolio-detail">Moneyline delegates to P5.2. Spread and total delegate to P5.6. Portfolio priority never weakens those gates.</p>
+    <div class="chips" id="portfolio-lists"></div>
+    <div class="chips">
+      <span class="chip safe">Zero provider calls</span>
+      <span class="chip safe">No automatic promotion</span>
+      <span class="chip safe">No automatic rollback</span>
+      <span class="chip safe">Owner confirmation required</span>
+      <span class="chip safe">No probability changes by console</span>
+      <span class="chip safe">No selected-side changes</span>
+      <span class="chip safe">No wager execution</span>
+    </div>
+  </section>
+
+  <section class="market-grid" id="market-grid" aria-label="Per-market calibration operations"></section>
+</main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+ const {$,esc,fetchJSON,shell,toast}=NFLHub;shell('models');
+ const markets=['moneyline','spread','total'];
+ let portfolio=null,sessionInfo=null;
+ $('#portfolio-refresh').onclick=loadPortfolio;
+ await loadPortfolio();
+
+ function role(){return String(sessionInfo?.role||sessionInfo?.user?.role||'').toLowerCase()}
+ function title(value){return String(value||'—').replaceAll('_',' ').replaceAll('-',' ')}
+ function list(values){return (values||[]).join(', ')||'None'}
+
+ async function loadPortfolio(){
+  $('#portfolio-refresh').disabled=true;$('#portfolio-state').textContent='Loading…';
+  try{
+   const [control,auth]=await Promise.all([
+    fetchJSON('/api/game-calibration/portfolio-control-plane'),
+    fetchJSON('/api/auth/session')
+   ]);
+   portfolio=control;sessionInfo=auth;renderPortfolio();
+  }catch(err){
+   portfolio=null;$('#portfolio-state').textContent='Unavailable';$('#portfolio-state').className='portfolio-state';
+   $('#portfolio-message').textContent=`Calibration portfolio unavailable: ${err.message}`;
+   $('#portfolio-detail').textContent='All promotion and rollback controls remain disabled while the P5.8 portfolio cannot be loaded.';
+   $('#market-grid').innerHTML='<div class="decision error">Governance unavailable. No mutation is permitted.</div>';
+  }finally{$('#portfolio-refresh').disabled=false}
+ }
+
+ function renderPortfolio(){
+  const p=portfolio||{},state=String(p.state||'unavailable');
+  $('#portfolio-state').textContent=title(state);$('#portfolio-state').className=`portfolio-state ${state}`;
+  $('#portfolio-action').textContent=title(p.recommendedAction);
+  $('#portfolio-promotions').textContent=list(p.promotionReviewMarkets);
+  $('#portfolio-rollbacks').textContent=list(p.rollbackReviewMarkets);
+  $('#portfolio-champions').textContent=list(p.activeChampionMarkets);
+  $('#portfolio-message').textContent=p.message||'No canonical P5.8 portfolio decision is available.';
+  $('#portfolio-detail').textContent=`Priority: ${(p.priorityContract||[]).join(' → ')||'unavailable'} · role: ${role()||'unknown'}.`;
+  $('#portfolio-lists').innerHTML=[
+   ['Collecting',p.collectingMarkets],['Healthy',p.healthyChampionMarkets],['Unavailable',p.unavailableMarkets]
+  ].map(([label,values])=>`<span class="chip">${esc(label)}: ${esc(list(values))}</span>`).join('');
+  $('#market-grid').innerHTML=markets.map(m=>marketCard(m,p.markets?.[m]||{})).join('');
+  bindMarketControls();
+  for(const market of markets)syncMarketButtons(market);
+ }
+
+ function marketCard(market,row){
+  const ev=row.evidence||{},state=String(row.state||'unavailable'),commands=row.commands||{};
+  const promotion=commands.promotion||{},rollback=commands.rollback||{};
+  const source=row.governanceSource||'—';
+  return `<article class="market-card" data-market="${market}">
+   <div class="market-head"><h2>${market}</h2><span class="market-state ${esc(state)}" id="${market}-state">${esc(title(state))}</span></div>
+   <div class="market-metrics">
+    <div class="metric"><span>Recommended</span><b>${esc(title(row.recommendedAction))}</b></div>
+    <div class="metric"><span>Champion</span><b>${esc(row.championApplied?(row.championCandidateId||'Promoted'):'Baseline')}</b></div>
+    <div class="metric"><span>Challenger graded</span><b>${esc(String(ev.challengerGradedSamples??0))}</b></div>
+    <div class="metric"><span>Guard graded</span><b>${esc(String(ev.guardGradedSamples??0))}</b></div>
+   </div>
+   <div class="market-message"><strong>${esc(row.message||'No canonical market decision available.')}</strong><p>${esc(source)} · promotion eligible ${ev.promotionEligible===true?'yes':'no'} · rollback recommended ${ev.rollbackRecommended===true?'yes':'no'} · blockers ${esc(list(row.blockers))}</p></div>
+   <div class="market-actions">
+    <section class="action">
+     <h3>Promote ${market} challenger</h3>
+     <p>Enabled only when the delegated control plane marks this exact market promotion-ready and the signed-in role is owner.</p>
+     <code id="${market}-promote-token">${esc(promotion.confirmation||'—')}</code>
+     <input id="${market}-promote-confirm" autocomplete="off" placeholder="Type exact promotion confirmation" aria-label="${market} promotion confirmation">
+     <button class="btn primary" id="${market}-promote-btn" type="button" disabled>Promote ${market}</button>
+     <div class="help" id="${market}-promote-help">Checking owner role and portfolio readiness…</div>
+    </section>
+    <section class="action">
+     <h3>Rollback ${market} champion</h3>
+     <p>Enabled only when P5.8 preserves a delegated rollback-ready recommendation for this market and the signed-in role is owner.</p>
+     <code id="${market}-rollback-token">${esc(rollback.confirmation||'—')}</code>
+     <input id="${market}-rollback-confirm" autocomplete="off" placeholder="Type exact rollback confirmation" aria-label="${market} rollback confirmation">
+     <button class="btn" id="${market}-rollback-btn" type="button" disabled>Rollback ${market}</button>
+     <div class="help" id="${market}-rollback-help">Checking owner role and portfolio guard…</div>
+    </section>
+   </div>
+  </article>`
+ }
+
+ function bindMarketControls(){
+  for(const market of markets){
+   $(`#${market}-promote-confirm`).oninput=()=>syncMarketButtons(market);
+   $(`#${market}-rollback-confirm`).oninput=()=>syncMarketButtons(market);
+   $(`#${market}-promote-btn`).onclick=()=>runPortfolioMutation(market,'promotion');
+   $(`#${market}-rollback-btn`).onclick=()=>runPortfolioMutation(market,'rollback');
+  }
+ }
+
+ function syncMarketButtons(market){
+  const row=portfolio?.markets?.[market]||{},owner=role()==='owner';
+  const promotion=row.commands?.promotion||{},rollback=row.commands?.rollback||{};
+  const promoteInput=$(`#${market}-promote-confirm`),rollbackInput=$(`#${market}-rollback-confirm`);
+  const promoteBtn=$(`#${market}-promote-btn`),rollbackBtn=$(`#${market}-rollback-btn`);
+  if(!promoteBtn||!rollbackBtn)return;
+  promoteBtn.disabled=!(owner&&row.promoteReady===true&&promotion.allowed===true&&promoteInput.value===promotion.confirmation);
+  rollbackBtn.disabled=!(owner&&row.rollbackReady===true&&rollback.recommended!==false&&rollbackInput.value===rollback.confirmation);
+  const ph=$(`#${market}-promote-help`),rh=$(`#${market}-rollback-help`);
+  ph.textContent=owner?(row.promoteReady?`Owner verified · candidate ${row.candidateId||'unknown'}`:'Owner verified · promotion not currently eligible'):`Role ${role()||'unknown'} · owner required`;
+  rh.textContent=owner?(row.rollbackReady?'Owner verified · rollback review recommended':'Owner verified · rollback not currently recommended'):`Role ${role()||'unknown'} · owner required`;
+  ph.classList.toggle('owner',owner);rh.classList.toggle('owner',owner);
+ }
+
+ async function runPortfolioMutation(market,kind){
+  const row=portfolio?.markets?.[market]||{},command=row.commands?.[kind]||{},owner=role()==='owner';
+  if(!owner){toast('Owner role required');return}
+  if(kind==='promotion'&&row.promoteReady!==true){toast(`${market} promotion is not ready`);return}
+  if(kind==='rollback'&&row.rollbackReady!==true){toast(`${market} rollback is not recommended`);return}
+  if(!command.endpoint||!command.confirmation){toast('Delegated command contract is unavailable');return}
+  const input=$(`#${market}-${kind==='promotion'?'promote':'rollback'}-confirm`);
+  if(input.value!==command.confirmation){toast('Exact confirmation token required');return}
+  const candidate=kind==='promotion'?row.candidateId:null;
+  const prompt=kind==='promotion'?`Promote ${market} calibration candidate ${candidate}? The lower-layer owner-confirmed endpoint will change production ${market} calibration.`:`Rollback the promoted ${market} calibration champion to its governed baseline?`;
+  if(!confirm(prompt))return;
+  const body=kind==='promotion'?(market==='moneyline'?{candidateId:candidate,confirmation:command.confirmation}:{market,candidateId:candidate,confirmation:command.confirmation}):(market==='moneyline'?{confirmation:command.confirmation}:{market,confirmation:command.confirmation});
+  const button=$(`#${market}-${kind==='promotion'?'promote':'rollback'}-btn`);button.disabled=true;
+  try{
+   await fetchJSON(command.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+   toast(kind==='promotion'?`${market} calibration champion promoted`:`${market} calibration champion rolled back`);
+   input.value='';await loadPortfolio();
+  }catch(err){toast(err.message);await loadPortfolio()}
+ }
+});
+</script>
+</body>
+</html>
