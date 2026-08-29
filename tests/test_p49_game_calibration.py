@@ -10,16 +10,19 @@ def _receipt(
     *,
     market_probability: float | None = 0.50,
     market: str = "moneyline",
+    game_id: str | None = None,
+    released_at: str | None = None,
 ) -> dict:
     release = {
         "modelProbability": probability,
         "marketKey": market,
+        "gameId": game_id or f"game-{idx:04d}",
     }
     if market_probability is not None:
         release["fairMarketProbability"] = market_probability
     return {
         "receiptId": f"g{idx:04d}",
-        "releasedAt": f"{idx:06d}",
+        "releasedAt": released_at or f"{idx:06d}",
         "grade": "win" if won else "loss",
         "release": release,
         "result": {"probability": probability},
@@ -59,6 +62,7 @@ def test_overconfident_game_challenger_clears_forward_holdout_for_human_review()
     candidate = report["candidate"]
     assert candidate is not None
     assert candidate["validationIsForwardHoldout"] is True
+    assert candidate["validationPreventsBatchAndGameLeakage"] is True
     assert candidate["validationBrierImprovement"] >= 0.005
     assert candidate["validationMarketSkillDelta"] is not None
     assert candidate["validationMarketSkillDelta"] >= -0.005
@@ -181,6 +185,50 @@ def test_forward_game_holdout_counts_are_deterministic():
     assert candidate["trainSamples"] == 70
     assert candidate["validationSamples"] == 30
     assert candidate["validationIsForwardHoldout"] is True
+
+
+def test_equal_time_publication_batch_cannot_straddle_holdout():
+    receipts = [
+        _receipt(i, 0.70, i % 3 != 0, market_probability=0.65)
+        for i in range(100)
+    ]
+    for idx in range(65, 75):
+        receipts[idx]["releasedAt"] = "000070"
+    report = p49.build_candidate_report(
+        receipts,
+        min_samples=80,
+        min_validation_samples=20,
+        min_market_validation_samples=10,
+        train_fraction=0.70,
+    )
+    candidate = report["candidate"]
+    assert candidate is not None
+    assert candidate["trainSamples"] == 65
+    assert candidate["validationSamples"] == 35
+    assert candidate["validationBoundaryReleasedAt"] == "000070"
+    assert candidate["validationPreventsBatchAndGameLeakage"] is True
+
+
+def test_same_game_cannot_appear_in_training_and_validation():
+    receipts = [
+        _receipt(i, 0.70, i % 3 != 0, market_probability=0.65)
+        for i in range(100)
+    ]
+    receipts[60]["release"]["gameId"] = "shared-game"
+    receipts[80]["release"]["gameId"] = "shared-game"
+    report = p49.build_candidate_report(
+        receipts,
+        min_samples=80,
+        min_validation_samples=20,
+        min_market_validation_samples=10,
+        train_fraction=0.70,
+    )
+    candidate = report["candidate"]
+    assert candidate is not None
+    assert candidate["trainSamples"] == 60
+    assert candidate["validationSamples"] == 40
+    assert candidate["validationBoundaryReleasedAt"] == "000060"
+    assert candidate["validationPreventsBatchAndGameLeakage"] is True
 
 
 def test_production_report_fails_closed_when_game_ledger_unavailable(monkeypatch):
