@@ -59,6 +59,12 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def _timestamp_token(value: datetime) -> str:
+    """Canonicalize aware/naive DB timestamps to the same UTC digest token."""
+    normalized = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return normalized.replace(tzinfo=None).isoformat(timespec="microseconds") + "Z"
+
+
 def _champion_snapshot(report: dict[str, Any]) -> dict[str, Any]:
     markets = report.get("markets") if isinstance(report.get("markets"), dict) else {}
     return {
@@ -88,7 +94,7 @@ def _attestation_digest(
         "integritySnapshot": integrity_snapshot,
         "previousAttestationDigest": previous_digest,
         "attestedBy": actor,
-        "createdAt": created_at.isoformat(),
+        "createdAt": _timestamp_token(created_at),
         "modelVersion": MODEL_VERSION,
     }
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
@@ -127,7 +133,13 @@ def list_attestations(limit: int = ATTESTATION_LIMIT) -> list[dict[str, Any]]:
 
 def verify_attestation_chain(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Verify the newest-first public attestation list as an append-only hash chain."""
-    ordered = sorted(rows, key=lambda row: (str(row.get("createdAt") or ""), str(row.get("attestationId") or "")))
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("createdAt") or ""),
+            str(row.get("attestationId") or ""),
+        ),
+    )
     errors: list[str] = []
     previous: str | None = None
     for row in ordered:
@@ -241,7 +253,11 @@ def attest_current_audit(
     existing_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if confirmation != ATTEST_CONFIRMATION:
-        return {"ok": False, "code": "CONFIRMATION_REQUIRED", "required": ATTEST_CONFIRMATION}
+        return {
+            "ok": False,
+            "code": "CONFIRMATION_REQUIRED",
+            "required": ATTEST_CONFIRMATION,
+        }
     actor = str(actor or "").strip()
     if not actor:
         return {"ok": False, "code": "ACTOR_REQUIRED"}
