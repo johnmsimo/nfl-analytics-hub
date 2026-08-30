@@ -1,9 +1,9 @@
 """
 Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
 outcome-learning diagnostics, calibration challenger/promotion/guard/control-plane,
-market calibration, post-promotion market guard, market control-plane, and
-all-market calibration portfolio governance, automatic grading, closing capture,
-and bankroll settings.
+market calibration, post-promotion market guard, market control-plane, all-market
+calibration portfolio governance and P6.0 audit, automatic grading, closing
+capture, and bankroll settings.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ import p54_game_market_calibration
 import p55_game_market_calibration_guard
 import p56_game_market_calibration_control_plane
 import p58_calibration_portfolio_control_plane
+import p60_calibration_governance_audit
 import tracker
 from security import bounded_number, json_body, limiter, require_roles
 
@@ -214,6 +215,13 @@ def api_game_market_calibration_control_plane():
 def api_game_calibration_portfolio_control_plane():
     """P5.8 canonical read-only moneyline/spread/total governance portfolio."""
     return jsonify(p58_calibration_portfolio_control_plane.build_production_portfolio())
+
+
+@tracker_bp.route("/api/game-calibration/audit-ledger")
+@tracker_bp.route("/api/tracker/game-calibration-audit-ledger")
+def api_game_calibration_audit_ledger():
+    """P6.0 read-only unified audit of P5.0/P5.4 calibration governance history."""
+    return jsonify(p60_calibration_governance_audit.build_production_report())
 
 
 @tracker_bp.route("/api/game-calibration/promote", methods=["POST"])
