@@ -38,6 +38,16 @@ def build_control_plane(
     audit_digest = str(audit.get("portfolioDigest") or "")
     audit_digest_valid = len(audit_digest) == 64
 
+    attestation_ledger = (
+        attestation.get("attestationLedger")
+        if isinstance(attestation.get("attestationLedger"), dict)
+        else {}
+    )
+    attestation_available = bool(
+        attestation.get("available") is not False
+        and attestation.get("ledgerAvailable") is not False
+        and attestation_ledger.get("available", True) is not False
+    )
     attestation_state = str(attestation.get("state") or "unavailable")
     attestation_state_valid = attestation_state in _VALID_ATTESTATION_STATES
     chain = (
@@ -61,6 +71,8 @@ def build_control_plane(
         blockers.append("audit_not_ready")
     if not audit_digest_valid:
         blockers.append("audit_digest_invalid")
+    if not attestation_available:
+        blockers.append("attestation_unavailable")
     if not attestation_state_valid:
         blockers.append("attestation_state_invalid")
     if not chain_ok:
@@ -78,6 +90,12 @@ def build_control_plane(
         trust_level = "blocked"
         mutation_posture = "hold"
         message = "P6.0 audit integrity is degraded. Governance changes should remain on hold pending review."
+    elif not attestation_available:
+        state = "unavailable"
+        action = "RESTORE_ATTESTATION_LEDGER_AVAILABILITY"
+        trust_level = "blocked"
+        mutation_posture = "hold"
+        message = "The P6.1 attestation ledger cannot be read. Hold governance mutations and attestation commands until ledger visibility is restored."
     elif not attestation_state_valid or not chain_ok or attestation_state == "attestation-chain-degraded":
         state = "attestation-chain-degraded"
         action = "REVIEW_ATTESTATION_CHAIN"
@@ -113,6 +131,7 @@ def build_control_plane(
         state == "trusted"
         and audit_ready
         and audit_digest_valid
+        and attestation_available
         and chain_ok
         and current_attestation
         and digest_matches_latest
@@ -128,7 +147,7 @@ def build_control_plane(
         blockers.append("current_attestation_mismatch")
 
     return {
-        "available": audit_available and attestation.get("available") is not False,
+        "available": audit_available and attestation_available,
         "model": MODEL_NAME,
         "modelVersion": MODEL_VERSION,
         "state": state,
@@ -149,6 +168,9 @@ def build_control_plane(
             else [],
         },
         "attestation": {
+            "available": attestation_available,
+            "ledgerAvailable": attestation.get("ledgerAvailable", attestation_available),
+            "ledgerError": attestation_ledger.get("error"),
             "state": attestation_state,
             "current": current_attestation,
             "ready": attestation_ready,
@@ -163,7 +185,11 @@ def build_control_plane(
         "command": {
             "attest": {
                 "endpoint": "/api/game-calibration/audit-attest",
-                "allowed": state == "attestation-required" and attestation_ready,
+                "allowed": bool(
+                    attestation_available
+                    and state == "attestation-required"
+                    and attestation_ready
+                ),
                 "confirmation": p61.ATTEST_CONFIRMATION,
                 "ownerRoleRequired": True,
             }
