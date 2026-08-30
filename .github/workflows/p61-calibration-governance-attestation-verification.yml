@@ -1,0 +1,93 @@
+name: P6.1 Calibration Governance Attestation Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Confirm zero-credit, zero-write P6.1 governance attestation verification
+        required: true
+        default: 'NO'
+        type: choice
+        options:
+          - 'NO'
+          - RUN_CALIBRATION_GOVERNANCE_ATTESTATION_VERIFY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p61-calibration-governance-attestation-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: inputs.confirmation == 'RUN_CALIBRATION_GOVERNANCE_ATTESTATION_VERIFY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate P6.1 attestation safety controls
+        shell: bash
+        run: |
+          test -n "$FLY_API_TOKEN" || (echo "Missing FLY_API_TOKEN repository secret" && exit 1)
+          test "${{ inputs.confirmation }}" = "RUN_CALIBRATION_GOVERNANCE_ATTESTATION_VERIFY"
+          grep -q 'ATTEST_CALIBRATION_GOVERNANCE' p61_calibration_governance_attestation.py
+          grep -q 'writesPromotionRegistries.*False' p61_calibration_governance_attestation.py
+          grep -q 'automaticAttestation.*False' p61_calibration_governance_attestation.py
+          grep -q 'automaticPromotion.*False' p61_calibration_governance_attestation.py
+          grep -q 'automaticRollback.*False' p61_calibration_governance_attestation.py
+          grep -q 'attestation_digest' p61_calibration_governance_attestation.py
+          grep -q 'previous_attestation_digest' p61_calibration_governance_attestation.py
+
+      - name: Verify production readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="$(mktemp)"
+          trap 'rm -f "$BODY"' EXIT
+          set +e
+          HTTP_CODE=$(curl --silent --show-error --fail-with-body \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            --output "$BODY" --write-out "%{http_code}" \
+            https://nfl-analytics-hub.fly.dev/ready)
+          CURL_RC=$?
+          set -e
+          echo "Public /ready HTTP status: ${HTTP_CODE:-unknown}"
+          if [ -s "$BODY" ]; then
+            cat "$BODY"
+            echo
+          fi
+          if [ "$CURL_RC" -ne 0 ] || [ "${HTTP_CODE:-000}" != "200" ]; then
+            exit 1
+          fi
+          python - "$BODY" <<'PY'
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload.get("ok"), payload
+          assert payload.get("database") == "ready", payload
+          assert payload.get("schedule", {}).get("ready"), payload
+          PY
+
+      - name: Run sanitized P6.1 governance attestation verification
+        shell: bash
+        run: |
+          # Reads the P6.0 audit, P5.0/P5.4 promotion histories, and P6.1
+          # attestation ledger. Synthetic attestations use persist=False.
+          # No provider refresh, registry write, attestation write, Tracker write,
+          # model change, or bet execution occurs in this verifier.
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p61_calibration_governance_attestation_verification.py"
+
+      - name: Re-run sanitized P2/P3 safety verification
+        shell: bash
+        run: |
+          flyctl ssh console --app nfl-analytics-hub --command \
+            "/usr/bin/env PYTHONPATH=/app python /app/scripts/p2_exit_verification.py"
