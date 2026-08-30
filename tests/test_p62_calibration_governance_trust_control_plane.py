@@ -29,6 +29,7 @@ def _attestation(
     chain_ok: bool = True,
     digest: str = DIGEST,
     event_count: int = 3,
+    available: bool = True,
 ) -> dict:
     latest = None
     if state != "unattested":
@@ -39,16 +40,21 @@ def _attestation(
             "attestationDigest": "b" * 64,
         }
     return {
-        "available": True,
+        "available": available,
+        "ledgerAvailable": available,
         "state": state,
         "attestationReady": ready,
         "currentAttestation": current,
         "latestAttestation": latest,
+        "attestationLedger": {
+            "available": available,
+            "error": None if available else "ATTESTATION_LEDGER_READ_FAILED",
+        },
         "attestationChain": {
-            "ok": chain_ok,
+            "ok": chain_ok if available else False,
             "attestationCount": 0 if latest is None else 1,
             "headAttestationDigest": None if latest is None else "b" * 64,
-            "errors": [] if chain_ok else ["attestation_digest_mismatch:p61-test"],
+            "errors": [] if chain_ok and available else ["attestation_ledger_unavailable"],
         },
     }
 
@@ -116,6 +122,28 @@ def test_p62_broken_attestation_chain_blocks_trust():
     assert report["trustLevel"] == "blocked"
     assert report["recommendedAction"] == "REVIEW_ATTESTATION_CHAIN"
     assert "attestation_chain_invalid" in report["blockers"]
+
+
+def test_p62_unavailable_attestation_ledger_fails_closed():
+    report = p62.build_control_plane(
+        _audit(),
+        _attestation(
+            "attestation-chain-degraded",
+            ready=False,
+            chain_ok=False,
+            available=False,
+        ),
+    )
+    assert report["available"] is False
+    assert report["state"] == "unavailable"
+    assert report["trusted"] is False
+    assert report["trustLevel"] == "blocked"
+    assert report["recommendedAction"] == "RESTORE_ATTESTATION_LEDGER_AVAILABILITY"
+    assert report["recommendedMutationPosture"] == "hold"
+    assert "attestation_unavailable" in report["blockers"]
+    assert report["attestation"]["ledgerAvailable"] is False
+    assert report["attestation"]["ledgerError"] == "ATTESTATION_LEDGER_READ_FAILED"
+    assert report["command"]["attest"]["allowed"] is False
 
 
 def test_p62_fails_closed_when_current_claim_does_not_match_live_audit():
