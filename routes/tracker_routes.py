@@ -2,8 +2,8 @@
 Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
 outcome-learning diagnostics, calibration challenger/promotion/guard/control-plane,
 market calibration, post-promotion market guard, market control-plane, all-market
-calibration portfolio governance and P6.0 audit, automatic grading, closing
-capture, and bankroll settings.
+calibration portfolio governance, P6.0 audit, and P6.1 audit attestations,
+automatic grading, closing capture, and bankroll settings.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ import p55_game_market_calibration_guard
 import p56_game_market_calibration_control_plane
 import p58_calibration_portfolio_control_plane
 import p60_calibration_governance_audit
+import p61_calibration_governance_attestation
 import tracker
 from security import bounded_number, json_body, limiter, require_roles
 
@@ -224,6 +225,13 @@ def api_game_calibration_audit_ledger():
     return jsonify(p60_calibration_governance_audit.build_production_report())
 
 
+@tracker_bp.route("/api/game-calibration/audit-attestations")
+@tracker_bp.route("/api/tracker/game-calibration-audit-attestations")
+def api_game_calibration_audit_attestations():
+    """P6.1 audit checkpoint status and hash-chain verification."""
+    return jsonify(p61_calibration_governance_attestation.build_status())
+
+
 @tracker_bp.route("/api/game-calibration/promote", methods=["POST"])
 @tracker_bp.route("/api/tracker/game-calibration-promote", methods=["POST"])
 @limiter.limit(5, 60, key="user")
@@ -302,6 +310,22 @@ def api_game_market_calibration_rollback():
     except ValueError as exc:
         return jsonify({"ok": False, "code": "INVALID_MARKET", "error": str(exc)}), 400
     return (jsonify(result), 200) if result.get("ok") else (jsonify(result), 400)
+
+
+@tracker_bp.route("/api/game-calibration/audit-attest", methods=["POST"])
+@tracker_bp.route("/api/tracker/game-calibration-audit-attest", methods=["POST"])
+@limiter.limit(5, 60, key="user")
+@require_roles("owner")
+def api_game_calibration_audit_attest():
+    payload = json_body(allowed={"confirmation"}, required={"confirmation"})
+    actor = str((session.get("user") or {}).get("username") or "owner")
+    result = p61_calibration_governance_attestation.attest_current_audit(
+        confirmation=str(payload["confirmation"]),
+        actor=actor,
+    )
+    if result.get("ok"):
+        return jsonify(result)
+    return jsonify(result), 409 if result.get("code") in {"AUDIT_NOT_READY", "ATTESTATION_CHAIN_INVALID"} else 400
 
 
 @tracker_bp.route("/api/tracker/learning")
