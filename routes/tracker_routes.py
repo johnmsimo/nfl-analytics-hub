@@ -2,8 +2,9 @@
 Tracker API: persistent pick CRUD, player-prop and game publication ledgers,
 outcome-learning diagnostics, calibration challenger/promotion/guard/control-plane,
 market calibration, post-promotion market guard, market control-plane, all-market
-calibration portfolio governance, P6.0 audit, and P6.1 audit attestations,
-automatic grading, closing capture, and bankroll settings.
+calibration portfolio governance, P6.0 audit, P6.1 audit attestations, and P6.2
+governance trust control-plane, automatic grading, closing capture, and bankroll
+settings.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import p56_game_market_calibration_control_plane
 import p58_calibration_portfolio_control_plane
 import p60_calibration_governance_audit
 import p61_calibration_governance_attestation
+import p62_calibration_governance_trust_control_plane
 import tracker
 from security import bounded_number, json_body, limiter, require_roles
 
@@ -230,6 +232,13 @@ def api_game_calibration_audit_ledger():
 def api_game_calibration_audit_attestations():
     """P6.1 audit checkpoint status and hash-chain verification."""
     return jsonify(p61_calibration_governance_attestation.build_status())
+
+
+@tracker_bp.route("/api/game-calibration/governance-trust")
+@tracker_bp.route("/api/tracker/game-calibration-governance-trust")
+def api_game_calibration_governance_trust():
+    """P6.2 canonical read-only audit/attestation trust posture."""
+    return jsonify(p62_calibration_governance_trust_control_plane.build_production_control_plane())
 
 
 @tracker_bp.route("/api/game-calibration/promote", methods=["POST"])

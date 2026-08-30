@@ -117,7 +117,8 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def list_attestations(limit: int = ATTESTATION_LIMIT) -> list[dict[str, Any]]:
+def _load_attestations(limit: int = ATTESTATION_LIMIT) -> dict[str, Any]:
+    """Read checkpoints while preserving whether the ledger itself was readable."""
     stmt = (
         sa.select(attestations)
         .order_by(attestations.c.created_at.desc(), attestations.c.attestation_id.desc())
@@ -127,8 +128,21 @@ def list_attestations(limit: int = ATTESTATION_LIMIT) -> list[dict[str, Any]]:
         rows = db.session.execute(stmt).mappings().all()
     except (RuntimeError, SQLAlchemyError):
         _rollback()
-        return []
-    return [_public(dict(row)) for row in rows]
+        return {
+            "available": False,
+            "rows": [],
+            "error": "ATTESTATION_LEDGER_READ_FAILED",
+        }
+    return {
+        "available": True,
+        "rows": [_public(dict(row)) for row in rows],
+        "error": None,
+    }
+
+
+def list_attestations(limit: int = ATTESTATION_LIMIT) -> list[dict[str, Any]]:
+    """Compatibility list API; build_status preserves ledger-read availability."""
+    return list(_load_attestations(limit).get("rows") or [])
 
 
 def verify_attestation_chain(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -178,13 +192,32 @@ def build_status(
     rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     audit = audit_report or p60.build_production_report()
-    history = list_attestations() if rows is None else list(rows)
-    chain = verify_attestation_chain(history)
+    if rows is None:
+        ledger = _load_attestations()
+        history = list(ledger.get("rows") or [])
+        ledger_available = ledger.get("available") is True
+        ledger_error = ledger.get("error")
+    else:
+        history = list(rows)
+        ledger_available = True
+        ledger_error = None
+
+    chain = (
+        verify_attestation_chain(history)
+        if ledger_available
+        else {
+            "ok": False,
+            "attestationCount": 0,
+            "headAttestationDigest": None,
+            "errors": ["attestation_ledger_unavailable"],
+        }
+    )
     latest = history[0] if history else None
     audit_ready = audit.get("ok") is True and audit.get("state") == "audit-ready"
     current_digest = str(audit.get("portfolioDigest") or "")
     checkpoint_current = bool(
-        latest
+        ledger_available
+        and latest
         and chain.get("ok") is True
         and str(latest.get("portfolioDigest") or "") == current_digest
         and int(latest.get("eventCount") or 0) == int(audit.get("eventCount") or 0)
@@ -192,6 +225,9 @@ def build_status(
     if not audit_ready:
         state = "audit-degraded"
         recommendation = "REPAIR_AUDIT_BEFORE_ATTESTATION"
+    elif not ledger_available:
+        state = "attestation-chain-degraded"
+        recommendation = "RESTORE_ATTESTATION_LEDGER"
     elif not chain.get("ok"):
         state = "attestation-chain-degraded"
         recommendation = "REVIEW_ATTESTATION_CHAIN"
@@ -204,8 +240,16 @@ def build_status(
     else:
         state = "unattested"
         recommendation = "ATTEST_CURRENT_AUDIT"
+
+    attestation_ready = bool(
+        audit_ready
+        and ledger_available
+        and chain.get("ok") is True
+        and not checkpoint_current
+    )
     return {
-        "available": True,
+        "available": ledger_available,
+        "ledgerAvailable": ledger_available,
         "model": MODEL_NAME,
         "modelVersion": MODEL_VERSION,
         "state": state,
@@ -217,14 +261,18 @@ def build_status(
             "portfolioDigest": audit.get("portfolioDigest"),
             "modelVersion": audit.get("modelVersion"),
         },
-        "attestationReady": audit_ready and chain.get("ok") is True and not checkpoint_current,
+        "attestationReady": attestation_ready,
         "currentAttestation": checkpoint_current,
         "latestAttestation": latest,
         "attestationChain": chain,
+        "attestationLedger": {
+            "available": ledger_available,
+            "error": ledger_error,
+        },
         "attestations": history,
         "command": {
             "endpoint": "/api/game-calibration/audit-attest",
-            "allowed": audit_ready and chain.get("ok") is True and not checkpoint_current,
+            "allowed": attestation_ready,
             "confirmation": ATTEST_CONFIRMATION,
             "ownerRoleRequired": True,
         },
@@ -264,7 +312,19 @@ def attest_current_audit(
     audit = audit_report or p60.build_production_report()
     if audit.get("ok") is not True or audit.get("state") != "audit-ready":
         return {"ok": False, "code": "AUDIT_NOT_READY", "audit": audit}
-    rows = list_attestations() if existing_rows is None else list(existing_rows)
+
+    if existing_rows is None:
+        ledger = _load_attestations()
+        if ledger.get("available") is not True:
+            return {
+                "ok": False,
+                "code": "ATTESTATION_LEDGER_UNAVAILABLE",
+                "error": ledger.get("error"),
+            }
+        rows = list(ledger.get("rows") or [])
+    else:
+        rows = list(existing_rows)
+
     chain = verify_attestation_chain(rows)
     if chain.get("ok") is not True:
         return {"ok": False, "code": "ATTESTATION_CHAIN_INVALID", "chain": chain}

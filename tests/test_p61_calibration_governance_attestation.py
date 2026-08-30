@@ -41,6 +41,8 @@ def _audit(*, digest: str = "a" * 64, event_count: int = 3, ok: bool = True) -> 
 
 def test_p61_status_is_unattested_when_audit_is_ready_and_history_empty():
     status = p61.build_status(_audit(), [])
+    assert status["available"] is True
+    assert status["ledgerAvailable"] is True
     assert status["state"] == "unattested"
     assert status["attestationReady"] is True
     assert status["command"]["allowed"] is True
@@ -164,12 +166,43 @@ def test_p61_hash_chain_detects_tampering():
     assert any("attestation_digest_mismatch" in error for error in result["errors"])
 
 
+def test_p61_ledger_read_failure_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        p61,
+        "_load_attestations",
+        lambda limit=p61.ATTESTATION_LIMIT: {
+            "available": False,
+            "rows": [],
+            "error": "ATTESTATION_LEDGER_READ_FAILED",
+        },
+    )
+    status = p61.build_status(_audit())
+    assert status["available"] is False
+    assert status["ledgerAvailable"] is False
+    assert status["state"] == "attestation-chain-degraded"
+    assert status["attestationReady"] is False
+    assert status["currentAttestation"] is False
+    assert status["attestationLedger"]["error"] == "ATTESTATION_LEDGER_READ_FAILED"
+    assert status["attestationChain"]["ok"] is False
+    assert status["command"]["allowed"] is False
+
+    result = p61.attest_current_audit(
+        confirmation=p61.ATTEST_CONFIRMATION,
+        actor="owner",
+        persist=False,
+        audit_report=_audit(),
+    )
+    assert result["ok"] is False
+    assert result["code"] == "ATTESTATION_LEDGER_UNAVAILABLE"
+
+
 def test_p61_status_route_is_read_only(client, monkeypatch):
     monkeypatch.setattr(
         p61,
         "build_status",
         lambda: {
             "available": True,
+            "ledgerAvailable": True,
             "state": "unattested",
             "attestationReady": True,
             "safetyContract": {
